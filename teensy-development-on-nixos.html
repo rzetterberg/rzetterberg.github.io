@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- 2017-05-08 Mon 12:04 -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teensy development on NixOS</title>
+<meta name="generator" content="Org mode">
+<link rel="stylesheet" type="text/css" href="assets/common/htmlize.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/theme.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/main.css"/>
+</head>
+<body>
+<div id="org-div-home-and-up">
+ <a accesskey="h" href="../"> UP </a>
+ |
+ <a accesskey="H" href="/"> HOME </a>
+</div><div id="content">
+<div class="rz-header">
+  <img class="rz-logotype" src="assets/common/logotype.svg" />
+</div>
+<div class="rz-menu">
+  <ul>
+    <li><a href="index.html">To article list</a></li>
+  </ul>
+</div>
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-98746269-1', 'auto');
+  ga('send', 'pageview');
+</script>
+<dl class="org-dl">
+<dt>Published</dt><dd>2017-01-04</dd>
+</dl>
+
+<p>
+This article will show you how to setup a basic project on <a href="http://nixos.org/">NixOS</a> for developing
+embedded applications for the <a href="https://www.pjrc.com/teensy/teensy31.html">Teensy 3.1</a> without using the Arduino IDE.
+</p>
+
+<p>
+At the end of the article you will have a complete project you can just run
+<code>nix-shell</code> inside and start working.
+</p>
+
+<p>
+I will go through how to setup the project step-by-step, explaining as I go.
+If you are only interested in the source files, just scroll to the end.
+</p>
+
+<p>
+For this article to make most sense you should be familiar with using NixOS,
+GNU Make and GCC.
+</p>
+
+<div id="outline-container-orgb9eefdb" class="outline-2">
+<h2 id="orgb9eefdb">Dependencies</h2>
+<div class="outline-text-2" id="text-orgb9eefdb">
+<p>
+I wanted to setup a project where I could write code for the device itself, but
+also unit tests that ran on my host.
+</p>
+
+<p>
+Which meant I needed to have access to two compilers:
+<code>gcc</code> for my host and <code>gcc-arm-none-eabi</code> that is used for the device.
+</p>
+
+<p>
+The nixpkgs for those two compilers have the attribute names <code>gcc</code> and
+<code>gcc-arm-embedded</code> respectively. At the time the Teensy core library could
+not be compiled with <code>gcc-arm-embedded</code> above version <b>4.7</b>, so I needed to use
+the package <code>gcc-arm-embedded-4_7</code> instead.
+</p>
+
+<p>
+To upload the built hex-files to the Teensy device I also needed the
+<a href="https://www.pjrc.com/teensy/loader_cli.html">Teensy Loader for CLI</a>. Which has the attribute name <code>teensy-loader-cli</code> in
+nixpkgs.
+</p>
+
+<p>
+I created a <b>default.nix</b> file with the dependencies my project needed:
+</p>
+
+<p>
+<b>default.nix</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">{ stdenv, lib, gcc, gcc-arm-embedded-4_7, teensy-loader-cli }:
+
+stdenv.mkDerivation rec {
+  name    = <span style="color: #2aa889;">"teensy-dev-${version}"</span>;
+  version = <span style="color: #2aa889;">"1.0.0"</span>;
+  src     = ./src;
+
+  buildInputs = [
+    gcc
+    gcc-arm-embedded-4_7
+    teensy-loader-cli
+  ];
+}
+</pre>
+</div>
+
+<p>
+And then I created a simple <code>shell.nix</code> file that called my package definition:
+</p>
+
+<p>
+<b>shell.nix</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">{ system ? builtins.currentSystem }:
+
+let
+  pkgs = import &lt;nixpkgs&gt; { inherit system; };
+in
+  pkgs.callPackage ./default.nix {}
+</pre>
+</div>
+
+<p>
+I could then run <code>nix-shell</code> and check that the needed tools was be available:
+</p>
+
+<pre class="example">
+$ nix-shell
+
+[nix-shell]$ whereis gcc
+gcc: /nix/store/4mhq8ic8wk46wpwjyghap1x7xfdk2rj3-gcc-wrapper-5.4.0/bin/gcc /nix/store/haqh3hshg8w1779xgyzr4pk9q706ra30-gcc-5.4.0/bin/gcc
+
+[nix-shell]$ whereis arm-none-eabi-gcc
+arm-none-eabi-gcc: /nix/store/h085f3ksivc2183hfn1sfbikgi5yf5bx-gcc-arm-embedded-4.7-2013q3-20130916/bin/arm-none-eabi-gcc
+
+[nix-shell]$ whereis teensy-loader-cli
+teensy-loader-cli: /nix/store/q8q2va34kb064p4knm37d1kda5rp3k1g-teensy-loader-cli-2.1/bin/teensy-loader-cli
+</pre>
+
+<p>
+I could then start to figure out how to use my Teensy board without the
+Arduino IDE.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org02e6818" class="outline-2">
+<h2 id="org02e6818">Teensy core library build</h2>
+<div class="outline-text-2" id="text-org02e6818">
+<p>
+First off, to make a device Arduino compatible you need to create an Arduino
+core library implementation.
+</p>
+
+<p>
+Turns out the Teensy implementation was available on the <a href="https://github.com/PaulStoffregen/cores">PaulStoffregen/cores</a>
+Github repo. (Paul Stoffregen is the creator of the Teensy boards).
+</p>
+
+<p>
+The repo had a <a href="https://github.com/PaulStoffregen/cores/tree/3a6e99ca1ca3ed3948e90fa72d8e27f787f3dd03/teensy3">teensy3</a> folder with the specific implementation
+along with a <a href="https://github.com/PaulStoffregen/cores/blob/3a6e99ca1ca3ed3948e90fa72d8e27f787f3dd03/teensy3/Makefile">Makefile</a> and a target <a href="https://github.com/PaulStoffregen/cores/blob/3a6e99ca1ca3ed3948e90fa72d8e27f787f3dd03/teensy3/main.cpp">main.cpp</a> file, that served as a good example
+on how to build the library without the Arduino IDE.
+</p>
+
+<p>
+After removing the Arduino specific stuff from the <code>Makefile</code> and simplifying it,
+I had this <code>Makefile</code>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-makefile"><span style="color: #599cab;">OPTIONS</span> =  -DF_CPU=72000000 -DUSB_SERIAL -DLAYOUT_US_ENGLISH
+<span style="color: #599cab;">OPTIONS</span> += -DUSING_MAKEFILE -D__MK20DX256__
+
+<span style="color: #599cab;">CPPFLAGS</span> = -Wall -g -Os -mcpu=cortex-m4 -mthumb -MMD $(<span style="color: #599cab;">OPTIONS</span>) -I.
+<span style="color: #599cab;">CXXFLAGS</span> = -std=gnu++0x -felide-constructors -fno-exceptions -fno-rtti
+
+<span style="color: #599cab;">LDFLAGS</span> =  -Os -Wl,--gc-sections,--defsym=__rtc_localtime=0
+<span style="color: #599cab;">LDFLAGS</span> += --specs=nano.specs -mcpu=cortex-m4 -mthumb -Tmk20dx256.ld
+
+<span style="color: #599cab;">LIBS</span> = -lm
+
+<span style="color: #599cab;">CC</span>      = arm-none-eabi-gcc
+<span style="color: #599cab;">CXX</span>     = arm-none-eabi-g++
+<span style="color: #599cab;">OBJCOPY</span> = arm-none-eabi-objcopy
+<span style="color: #599cab;">SIZE</span>    = arm-none-eabi-size
+
+<span style="color: #599cab;">C_FILES</span>   := $(<span style="color: #599cab;">wildcard</span> *.c)
+<span style="color: #599cab;">CPP_FILES</span> := $(<span style="color: #599cab;">wildcard</span> *.cpp)
+<span style="color: #599cab;">OBJS</span>      := $(<span style="color: #599cab;">C_FILES</span>:<span style="color: #599cab;">.c</span>=.o) $(<span style="color: #599cab;">CPP_FILES</span>:<span style="color: #599cab;">.cpp</span>=.o)
+
+<span style="color: #599cab;">all</span>: $(<span style="color: #599cab;">OBJS</span>)
+
+-include $(<span style="color: #599cab;">OBJS</span>:<span style="color: #599cab;">.o</span>=.d)
+</pre>
+</div>
+
+<p>
+There are a number of different <code>Teensy3</code> boards, the one I was using was the
+<code>3.1</code> with the <code>MK20DX256VLH7</code> processor. At the time there was also the <code>3.0</code>
+with the <code>MK20DX128VLH5</code> processor.
+</p>
+
+<p>
+When building the core library for the <code>Teensy3</code> boards you need to supply 3
+things that change between the boards revisions:
+</p>
+
+<ul class="org-ul">
+<li>Clock rate of the processor</li>
+<li>The processor name</li>
+<li>Path to processor specific linker script</li>
+</ul>
+
+<p>
+These options are supplied as flags in the makefile variables <code>OPTIONS</code> and
+<code>LDFLAGS</code>.
+</p>
+
+<p>
+The <b>clock rate</b> is set in <code>OPTIONS</code> using the flag <code>-DF_CPU=[herz]</code>. The
+processor on the <code>Teensy3.1</code> has a clock rate of <b>72 Mhz</b>, so I used the flag:
+<code>-DF_CPU=72000000</code>.
+</p>
+
+<p>
+The <b>processor name</b> is set in <code>OPTIONS</code> using the flag <code>-D__[short name]__</code>. The
+full processor name of the <code>Teensy3.1</code> is <code>MK20DX256VLH7</code>, so I used the short
+name in the flag: <code>-D__MK20DX256__</code>.
+</p>
+
+<p>
+All processor specific linker scripts are situated in the root of the teensy3
+source tree. They have the name <code>[short name].ld</code> where short name is the
+processor name in lower case. The <b>linker script</b> path is set in <code>LDFLAGS</code>
+using the flag <code>-T[short name].ld</code>, so I used the flag: <code>-Tmk20dx256.ld</code>.
+</p>
+</div>
+</div>
+
+<div id="outline-container-orgd425517" class="outline-2">
+<h2 id="orgd425517">Teensy core library derivation</h2>
+<div class="outline-text-2" id="text-orgd425517">
+<p>
+The <code>Makefile</code> above produces object files for all <i>C and C++</i> files it finds
+in the current directory.
+</p>
+
+<p>
+To avoid having to include source code and building of the Teensy core library
+in my project, I created a separate nixpkg definition. That meant that the
+Teensy library was built once and then put in the nix store.
+</p>
+
+<p>
+For simplicity I wanted to be able to use <code>pkg-config</code> when including and
+linking against the teensy library in my project. I also wanted to create a
+nixpkg definition that could be used for other revisions of the Teensy board.
+</p>
+
+<p>
+To do this I created 4 files. First a part of the <code>Makefile</code> that contained all
+the flags, that could be included in the <code>Makefile</code>, but also that I could
+include in my projects <code>Makefile</code>:
+</p>
+
+<p>
+<b>teensy3-core/flags.mk</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-makefile"><span style="color: #599cab;">OPTIONS</span> =  -DF_CPU=@clockRate@ -DUSB_SERIAL -DLAYOUT_US_ENGLISH
+<span style="color: #599cab;">OPTIONS</span> += -DUSING_MAKEFILE -D__@mcu@__
+
+<span style="color: #599cab;">CPPFLAGS</span> = -mcpu=cortex-m4 -mthumb -MMD $(<span style="color: #599cab;">OPTIONS</span>)
+<span style="color: #599cab;">CXXFLAGS</span> = -std=gnu++0x -felide-constructors -fno-exceptions -fno-rtti
+
+<span style="color: #599cab;">LDFLAGS</span> =  -Wl,--gc-sections,--defsym=__rtc_localtime=0 --specs=nano.specs
+
+<span style="color: #599cab;">LIBS</span> = -lm
+
+<span style="color: #599cab;">CC</span>  = arm-none-eabi-gcc
+<span style="color: #599cab;">CXX</span> = arm-none-eabi-g++
+</pre>
+</div>
+
+<p>
+Then the actual <code>Makefile</code>:
+</p>
+
+<p>
+<b>teensy3-core/Makefile</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-makefile"><span style="color: #195466; font-weight: bold;">include</span> <span style="color: #599cab;">flags.mk</span>
+
+<span style="color: #599cab;">CPPFLAGS</span> += -I.
+<span style="color: #599cab;">LDFLAGS</span>  += -T@linkerScript@
+
+<span style="color: #599cab;">C_FILES</span>   := $(<span style="color: #599cab;">wildcard</span> *.c)
+<span style="color: #599cab;">CPP_FILES</span> := $(<span style="color: #599cab;">wildcard</span> *.cpp)
+<span style="color: #599cab;">OBJS</span>      := $(<span style="color: #599cab;">C_FILES</span>:<span style="color: #599cab;">.c</span>=.o) $(<span style="color: #599cab;">CPP_FILES</span>:<span style="color: #599cab;">.cpp</span>=.o)
+
+<span style="color: #599cab;">all</span>: $(<span style="color: #599cab;">OBJS</span>)
+
+-include $(<span style="color: #599cab;">OBJS</span>:<span style="color: #599cab;">.o</span>=.d)
+</pre>
+</div>
+
+
+<p>
+After that I created a <code>pkg-config</code> file:
+</p>
+
+<p>
+<b>teensy3-core/libteensy3-core.pc</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">prefix=@out@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${exec_prefix}/include
+
+Name: libteensy3-core
+Description: Teensy3 core static library and headers
+Version: @version@
+
+Libs: -L${libdir} -l:libteensy3-core.a -T${includedir}/@linkerScript@
+Cflags: -I${includedir}
+</pre>
+</div>
+
+<p>
+Note that values wrapped in <code>@...@</code> are values that nix will replace/substitute
+when the package is built.
+</p>
+
+<p>
+After that I created a nixpkg definition that tied everything together that you
+could supply two values (in addition to the dependencies):
+</p>
+
+<ul class="org-ul">
+<li><code>clockRate</code></li>
+<li><code>mcu</code></li>
+</ul>
+
+<p>
+Using these values nix can take care of creating the right files, building the
+static library and installing everything into the nix store.
+</p>
+
+<p>
+<b>teensy3-core/default.nix</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">{ stdenv, lib, fetchFromGitHub, writeTextFile, gcc-arm-embedded-4_7
+, clockRate, mcu
+}:
+
+let
+  linkerScript = (lib.toLower mcu) + <span style="color: #2aa889;">".ld"</span>;
+in
+  stdenv.mkDerivation rec {
+    name    = <span style="color: #2aa889;">"teensy3-core-${version}"</span>;
+    version = <span style="color: #2aa889;">"1.3.1"</span>;
+    src  = fetchFromGitHub {
+      owner  = <span style="color: #2aa889;">"PaulStoffregen"</span>;
+      repo   = <span style="color: #2aa889;">"cores"</span>;
+      rev    = <span style="color: #2aa889;">"3a6e99ca1ca3ed3948e90fa72d8e27f787f3dd03"</span>;
+      sha256 = <span style="color: #2aa889;">"0lqdnxqyvmgs1841z10nzzkp4cv8h1njfz3379nmm2xh3h4jhxck"</span>;
+    };
+
+    buildInputs = [
+      gcc-arm-embedded-4_7
+    ];
+
+    phases = [<span style="color: #2aa889;">"unpackPhase"</span> <span style="color: #2aa889;">"buildPhase"</span> <span style="color: #2aa889;">"installPhase"</span>];
+
+    buildPhase = ''
+      rm -f teensy3/main.cpp
+
+      substitute ${./flags.mk} ./teensy3/flags.mk \
+        --subst-var-by clockRate ${toString clockRate} \
+        --subst-var-by mcu ${mcu}
+
+      substitute ${./Makefile} ./teensy3/Makefile \
+        --subst-var-by linkerScript ${linkerScript}
+
+      make -C teensy3
+      ar rvs libteensy3-core.a *.o
+    '';
+
+    installPhase = ''
+      mkdir -p $out/{include,lib}
+      mkdir $out/lib/pkgconfig
+
+      mv *.a $out/lib
+      cp teensy3/* $out/include -R;
+
+      rm $(find $out -name <span style="color: #2aa889;">"*.c"</span> -o -name <span style="color: #2aa889;">"*.cpp"</span>)
+
+      substitute ${./teensy3-core.pc} $out/lib/pkgconfig/teensy3-core.pc \
+        --subst-var-by out $out \
+        --subst-var-by version ${version} \
+        --subst-var-by linkerScript ${linkerScript}
+    '';
+  }
+</pre>
+</div>
+</div>
+</div>
+
+<div id="outline-container-orgdfb63eb" class="outline-2">
+<h2 id="orgdfb63eb">Using the Teensy core library</h2>
+<div class="outline-text-2" id="text-orgdfb63eb">
+<p>
+I could then update my <code>default.nix</code> definition to include the teensy3
+core library as a dependency with the right values for my board:
+</p>
+
+<p>
+<b>default.nix</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">{ stdenv, lib, gcc, gcc-arm-embedded-4_7, teensy-loader-cli, callPackage
+, fetchFromGitHub, pkgconfig
+}:
+
+let
+  teensy3-core = callPackage ./teensy3-core/default.nix {
+    clockRate = 72000000;
+    mcu       = <span style="color: #2aa889;">"MK20DX256"</span>;
+  };
+in
+  stdenv.mkDerivation rec {
+    name    = <span style="color: #2aa889;">"teensy-dev-${version}"</span>;
+    version = <span style="color: #2aa889;">"1.1.0"</span>;
+    src     = ./src;
+
+    buildInputs = [
+      gcc
+      gcc-arm-embedded-4_7
+      teensy-loader-cli
+      teensy3-core
+      pkgconfig
+    ];
+  }
+</pre>
+</div>
+
+<p>
+After that the <code>teensy3-core</code> library was readily available via <code>pkg-config</code>:
+</p>
+
+<pre class="example">
+$ nix-shell
+
+[nix-shell]$ pkg-config teensy3-core --libs
+-L/nix/store/bs2q2x3fi2yn5hh3z6lf8kzrcly9nl04-teensy3-core-1.3.1/lib -l:libteensy3-core.a -T/nix/store/bs2q2x3fi2yn5hh3z6lf8kzrcly9nl04-teensy3-core-1.3.1/include/mk20dx256.ld
+
+[nix-shell]$ pkg-config teensy3-core --cflags
+-I/nix/store/bs2q2x3fi2yn5hh3z6lf8kzrcly9nl04-teensy3-core-1.3.1/include
+</pre>
+</div>
+</div>
+
+<div id="outline-container-org130c75d" class="outline-2">
+<h2 id="org130c75d">Compiling the project</h2>
+<div class="outline-text-2" id="text-org130c75d">
+<p>
+To actually build the project I created a <code>Makefile</code> that included the <code>flags.mk</code>
+file from <code>teensy3-core</code>, to avoid having to type all the flags again:
+</p>
+
+<p>
+<b>src/Makefile</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-makefile"><span style="color: #195466; font-weight: bold;">include</span> $(<span style="color: #599cab;">shell</span> pkg-config --variable=includedir teensy3-core)/flags.mk
+
+<span style="color: #599cab;">CPPFLAGS</span> += -I. $(<span style="color: #599cab;">shell</span> pkg-config --cflags teensy3-core)
+<span style="color: #599cab;">LDFLAGS</span>  += $(<span style="color: #599cab;">shell</span> pkg-config --libs teensy3-core)
+
+<span style="color: #599cab;">OBJCOPY</span> = arm-none-eabi-objcopy
+<span style="color: #599cab;">SIZE</span>    = arm-none-eabi-size
+
+<span style="color: #599cab;">DEVICE_ELF</span>  = main.elf
+<span style="color: #599cab;">DEVICE_HEX</span>  = $(<span style="color: #599cab;">DEVICE_ELF</span>:<span style="color: #599cab;">.elf</span>=.hex)
+<span style="color: #599cab;">C_FILES</span>    := $(<span style="color: #599cab;">wildcard</span> *.c)
+<span style="color: #599cab;">CPP_FILES</span>  := $(<span style="color: #599cab;">wildcard</span> *.cpp)
+<span style="color: #599cab;">OBJS</span>       := $(<span style="color: #599cab;">C_FILES</span>:<span style="color: #599cab;">.c</span>=.o) $(<span style="color: #599cab;">CPP_FILES</span>:<span style="color: #599cab;">.cpp</span>=.o)
+
+<span style="color: #599cab;">all</span>: $(<span style="color: #599cab;">DEVICE_HEX</span>)
+
+<span style="color: #599cab;">$(</span><span style="color: #599cab;">DEVICE_ELF</span><span style="color: #599cab;">)</span>: $(<span style="color: #599cab;">OBJS</span>)
+        $(<span style="color: #599cab;">CC</span>) $(<span style="color: #599cab;">CPPFLAGS</span>) $(<span style="color: #599cab;">LDFLAGS</span>) -o <span style="color: #599cab;">$</span><span style="color: #33859e; font-weight: bold;">@</span> $(<span style="color: #599cab;">OBJS</span>)
+
+<span style="color: #599cab;">$(</span><span style="color: #599cab;">DEVICE_HEX</span><span style="color: #599cab;">)</span>: $(<span style="color: #599cab;">DEVICE_ELF</span>)
+        $(<span style="color: #599cab;">SIZE</span>) $(<span style="color: #599cab;">DEVICE_ELF</span>)
+        $(<span style="color: #599cab;">OBJCOPY</span>) -O ihex -R .eeprom $(<span style="color: #599cab;">DEVICE_ELF</span>) <span style="color: #599cab;">$</span><span style="color: #33859e; font-weight: bold;">@</span>
+</pre>
+</div>
+
+<p>
+And my basic application:
+</p>
+
+<p>
+<b>src/main.cpp</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-c++"><span style="color: #c23127;">#include</span> <span style="color: #2aa889;">"WProgram.h"</span>
+
+<span style="color: #195466; font-weight: bold;">extern</span> <span style="color: #2aa889;">"C"</span> <span style="color: #d26937;">int</span> <span style="color: #599cab;">main</span>(<span style="color: #d26937;">void</span>)
+{
+  Serial.begin(9600);
+
+  Serial.println(<span style="color: #2aa889;">"look ma, no Arduino IDE!"</span>);
+
+  <span style="color: #195466; font-weight: bold;">for</span> (;;) {}
+}
+</pre>
+</div>
+
+<p>
+I could then just run <code>make</code> inside the <code>src</code> directory:
+</p>
+
+<pre class="example">
+nix-shell
+
+[nix-shell]$ cd src
+
+[nix-shell]$ make
+arm-none-eabi-g++ -std=gnu++0x -felide-constructors -fno-exceptions -fno-rtti -mcpu=cortex-m4 -mthumb -MMD -DF_CPU=72000000 -DUSB_SERIAL -DLAYOUT_US_ENGLISH -DUSING_MAKEFILE -D__MK20DX256__ -I. -I/nix/store/bs2q2x3fi2yn5hh3z6lf8kzrcly9nl04-teensy3-core-1.3.1/include  -c -o main.o main.cpp
+arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -MMD -DF_CPU=72000000 -DUSB_SERIAL -DLAYOUT_US_ENGLISH -DUSING_MAKEFILE -D__MK20DX256__ -I. -I/nix/store/bs2q2x3fi2yn5hh3z6lf8kzrcly9nl04-teensy3-core-1.3.1/include -Wl,--gc-sections,--defsym=__rtc_localtime=0 --specs=nano.specs -L/nix/store/bs2q2x3fi2yn5hh3z6lf8kzrcly9nl04-teensy3-core-1.3.1/lib -l:libteensy3-core.a -T/nix/store/bs2q2x3fi2yn5hh3z6lf8kzrcly9nl04-teensy3-core-1.3.1/include/mk20dx256.ld -o main.elf  main.o
+arm-none-eabi-size main.elf
+   text    data     bss     dec     hex filename
+   1124       0      28    1152     480 main.elf
+arm-none-eabi-objcopy -O ihex -R .eeprom main.elf main.hex
+</pre>
+
+<p>
+After that my program was ready to be uploaded to the device:
+</p>
+
+<pre class="example">
+[nix-shell]$ teensy-loader-cli --mcu=mk20dx256 -w -v main.hex
+</pre>
+
+<p>
+And there you have it! A minimal example of a fully working project for
+Teensy development on NixOS without the Arduino IDE.
+</p>
+
+<p>
+Hopefully this article have been useful to someone else!
+</p>
+</div>
+</div>
+
+<div id="outline-container-org6f808d1" class="outline-2">
+<h2 id="org6f808d1">The code</h2>
+<div class="outline-text-2" id="text-org6f808d1">
+<p>
+If you didn't read the article and just want to get the code you can <a href="./code/teensy-development-on-nixos.tar.gz">download
+it here</a>.
+</p>
+
+<p>
+That tar-file contains the following source tree:
+</p>
+
+<pre class="example">
+code/teensy-development-on-nixos
+├── default.nix
+├── shell.nix
+├── src
+│   ├── main.cpp
+│   └── Makefile
+└── teensy3-core
+    ├── default.nix
+    ├── flags.mk
+    ├── Makefile
+    └── teensy3-core.pc
+
+2 directories, 8 files
+</pre>
+
+<p>
+Then you just run <code>nix-shell</code> in the root and build the project inside the
+nix-shell:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh"><span style="color: #d26937;">cd</span> src
+make
+</pre>
+</div>
+
+<p>
+After the build is complete, you can upload the application to your Teensy
+with:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">teensy-loader-cli --mcu=mk20dx256 -w -v main.hex
+</pre>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

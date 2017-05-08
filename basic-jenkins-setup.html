@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- 2017-05-08 Mon 12:04 -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Using Jenkins to build private GitHub repos inside Docker</title>
+<meta name="generator" content="Org mode">
+<link rel="stylesheet" type="text/css" href="assets/common/htmlize.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/theme.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/main.css"/>
+</head>
+<body>
+<div id="org-div-home-and-up">
+ <a accesskey="h" href="../"> UP </a>
+ |
+ <a accesskey="H" href="/"> HOME </a>
+</div><div id="content">
+<div class="rz-header">
+  <img class="rz-logotype" src="assets/common/logotype.svg" />
+</div>
+<div class="rz-menu">
+  <ul>
+    <li><a href="index.html">To article list</a></li>
+  </ul>
+</div>
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-98746269-1', 'auto');
+  ga('send', 'pageview');
+</script>
+<dl class="org-dl">
+<dt>Published</dt><dd>2017-02-11</dd>
+</dl>
+
+<p>
+This article will show you how to setup <a href="https://jenkins.io/">Jenkins</a> on Debian to use
+<a href="https://www.docker.com/">Docker</a> to build private projects hosted on <a href="https://github.com/">GitHub</a>. I wrote this article mostly
+as a reminder to myself.
+</p>
+
+<p>
+The goal of this article is to be easy to digest and show only the most
+basic parts needed. At the end of the article is a list of things you could do
+after the setup.
+</p>
+
+<p>
+This article assumes you have a Debian Jessie host and a normal user with sudo
+privileges. When writing this article <b>Docker</b> was version <code>1.30.0</code> and
+<b>Jenkins</b> <code>2.42</code>.
+</p>
+
+<div id="outline-container-org6f2bf54" class="outline-2">
+<h2 id="org6f2bf54">Installing dependencies</h2>
+<div class="outline-text-2" id="text-org6f2bf54">
+<p>
+First off, we need to install some packages used by apt to retrieve packages
+over HTTPS:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">sudo apt-get install -y <span style="color: #2aa889;">\</span>
+     apt-transport-https <span style="color: #2aa889;">\</span>
+     ca-certificates <span style="color: #2aa889;">\</span>
+     software-properties-common
+</pre>
+</div>
+
+<p>
+Then we need to add the keys for the Jenkins and Docker repositories:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">wget -q -O - https://pkg.jenkins.io/debian/jenkins-ci.org.key | sudo apt-key add -
+wget -q -O - https://yum.dockerproject.org/gpg | sudo apt-key add -
+</pre>
+</div>
+
+<p>
+Then we need to add the source lists for the repositories:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">sudo sh -c <span style="color: #2aa889;">'echo deb http://pkg.jenkins.io/debian-stable binary/ &gt; /etc/apt/sources.list.d/jenkins.list'</span>
+sudo sh -c <span style="color: #2aa889;">'echo deb https://apt.dockerproject.org/repo debian-jessie main &gt; /etc/apt/sources.list.d/docker.list'</span>
+</pre>
+</div>
+
+<p>
+Then we can install the needed packages:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">sudo apt-get update --fix-missing
+
+sudo apt-get install -y jenkins docker-engine
+</pre>
+</div>
+
+<p>
+Then we should make sure the Jenkins and Docker services are running:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">sudo systemctl status jenkins
+</pre>
+</div>
+
+<pre class="example">
+● jenkins.service - LSB: Start Jenkins at boot time
+   Loaded: loaded (/etc/init.d/jenkins)
+   Active: active (running) since Tue 2017-01-24 13:08:32 GMT; 4min 6s ago
+</pre>
+
+<div class="org-src-container">
+<pre class="src src-sh">sudo systemctl status docker
+</pre>
+</div>
+
+<pre class="example">
+● docker.service - Docker Application Container Engine
+   Loaded: loaded (/lib/systemd/system/docker.service; enabled)
+   Active: active (running) since Tue 2017-01-24 13:06:21 GMT; 6min ago
+</pre>
+</div>
+</div>
+
+<div id="outline-container-orgfcdb2fd" class="outline-2">
+<h2 id="orgfcdb2fd">Configuring Jenkins</h2>
+<div class="outline-text-2" id="text-orgfcdb2fd">
+<p>
+Now that Jenkins and Docker is installed it's time to configure Jenkins.
+</p>
+
+<p>
+First we need the initial admin password for the Jenkins web interface. Which is
+found here:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+</pre>
+</div>
+
+<p>
+By default Jenkins web interface is accessible on port <code>8080</code>, so we open
+<code>http://localhost:8080</code> in our web browser and enter the admin password at the
+first step:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_install_step1.png" alt="jenkins_install_step1.png">
+</p>
+</div>
+
+<p>
+We then press <b>Select plugins to install</b>:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_install_step2.png" alt="jenkins_install_step2.png">
+</p>
+</div>
+
+<p>
+We then unselect all recommended plugins:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_install_step3.png" alt="jenkins_install_step3.png">
+</p>
+</div>
+
+<p>
+We then find the <b>Git plugin</b> and select it for installation:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_install_step4.png" alt="jenkins_install_step4.png">
+</p>
+</div>
+
+<p>
+We then press <b>Install</b> and wait for all plugins to get installed:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_install_step5.png" alt="jenkins_install_step5.png">
+</p>
+</div>
+
+<p>
+After that we can either create a personal admin user or continue with the
+default admin user:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_install_step6.png" alt="jenkins_install_step6.png">
+</p>
+</div>
+
+<p>
+After that we are shown the Jenkins dashboard:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_dashboard.png" alt="jenkins_dashboard.png">
+</p>
+</div>
+
+<p>
+We are now ready to create our first project.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org4c2ea46" class="outline-2">
+<h2 id="org4c2ea46">Creating our first Jenkins project</h2>
+<div class="outline-text-2" id="text-org4c2ea46">
+<p>
+We start off by pressing <b>New item</b> in the main menu to the left, then select
+<b>Freestyle project</b> and enter the name of our project:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step1.png" alt="jenkins_job_step1.png">
+</p>
+</div>
+
+<p>
+In the configuration view of our project, we select <b>Git</b> for source code
+management:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step2.png" alt="jenkins_job_step2.png">
+</p>
+</div>
+
+<p>
+We then enter the <code>HTTPS</code> link to our private GitHub repository:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step3.png" alt="jenkins_job_step3.png">
+</p>
+</div>
+
+<p>
+This will fail since our repository is <b>private</b>, so we need to authenticate
+against GitHub when cloning the project. There are two ways to do this that I
+know of:
+</p>
+
+<ul class="org-ul">
+<li>Cloning over <code>SSH</code> using private key</li>
+<li>Cloning over <code>HTTPS</code> using <a href="https://help.github.com/articles/creating-an-access-token-for-command-line-use/">personal access token</a></li>
+</ul>
+</div>
+
+<div id="outline-container-orgbce6e9c" class="outline-3">
+<h3 id="orgbce6e9c">Cloning over HTTPS</h3>
+<div class="outline-text-3" id="text-orgbce6e9c">
+<p>
+This article will use personal access token, because anyone using GitHub
+already knows how to access repositories over SSH.
+</p>
+
+<blockquote>
+<p>
+Personal access tokens function like ordinary OAuth access tokens. They can be
+used <b>instead of a password for Git over HTTPS</b>, or can be used to authenticate to
+the API over Basic Authentication.
+</p>
+</blockquote>
+
+<p>
+First we need to create the personal access token in GitHub before adding it as
+a credential in Jenkins.
+</p>
+
+<p>
+We do this by opening <b>Settings -&gt; Personal Access Token</b> and clicking
+<b>Generate new token</b> in GitHub. The created token should have access to private
+repositories enabled:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/github_token_step1.png" alt="github_token_step1.png">
+</p>
+</div>
+
+<p>
+We then copy the newly created token:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/github_token_step2.png" alt="github_token_step2.png">
+</p>
+</div>
+
+<p>
+And go back to Jenkins and choose to create a new credential for your private
+project:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step4.png" alt="jenkins_job_step4.png">
+</p>
+</div>
+
+<p>
+We then choose <b>Username and password</b> and use your GitHub username and the
+personal access token as password:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step5.png" alt="jenkins_job_step5.png">
+</p>
+</div>
+
+<p>
+After adding the new credential and selecting it in the dropdown the clone error
+should disappear:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step6.png" alt="jenkins_job_step6.png">
+</p>
+</div>
+
+<p>
+Now Jenkins can retrieve the source code of our private repository! When a build
+is started Jenkins will create a directory called the <b>workspace</b>, where the
+build will take place. The Git plugin will clone the repository and put all the
+source files inside that directory.
+</p>
+
+<p>
+A projects <b>workspace</b> is stored in <code>/var/lib/jenkins/workspace/[PROJECT NAME]</code>
+by default. For our project the full path will be
+<code>/var/lib/jenkins/workspace/test-project</code>.
+</p>
+
+<p>
+This is useful if we want to run build commands manually to debug failing builds.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org85e1f24" class="outline-3">
+<h3 id="org85e1f24">Building the Docker image</h3>
+<div class="outline-text-3" id="text-org85e1f24">
+<p>
+To define how a project is built in Jenkins you create <b>Build steps</b> that are
+performed sequentially. There are different types of <b>build steps</b>, in this
+example we will use <b>Execute shell</b> for simplicity.
+</p>
+
+<p>
+Our first build step will build the Docker-image from our projects <code>Dockerfile</code>.
+</p>
+
+<p>
+We start by scrolling down to the <b>Build</b> section and clicking
+<b>Add build step -&gt; Execute shell</b>:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step7.png" alt="jenkins_job_step7.png">
+</p>
+</div>
+
+<p>
+We then add the Docker <code>build</code> command to that step:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">docker build -t test-project:latest .
+</pre>
+</div>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step8.png" alt="jenkins_job_step8.png">
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org817ed1e" class="outline-3">
+<h3 id="org817ed1e">Building inside the Docker container</h3>
+<div class="outline-text-3" id="text-org817ed1e">
+<p>
+Our next task is to create a Jenkins build step that runs our projects build
+command inside a Docker-container from our built Docker-image.
+</p>
+
+<p>
+We start by adding another <b>Execute shell</b> build step:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step9.png" alt="jenkins_job_step9.png">
+</p>
+</div>
+
+<p>
+Suppose we have a script called <code>build_project.sh</code> in our repo that builds the
+project. To run that script inside a Docker-container created from our image
+we simply use the Docker <code>run</code> command in our Jenkins build step:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">docker run -v $<span style="color: #599cab;">WORKSPACE</span>:/repo test-project:latest ./build_project.sh
+</pre>
+</div>
+
+<p>
+<code>$WORKSPACE</code> is an environment variable that Jenkins exposes to the shell
+session of the build step. The value of the variable is the absolute path to
+the directory where the build is carried out.
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_job_step10.png" alt="jenkins_job_step10.png">
+</p>
+</div>
+
+<p>
+We then click <b>Save</b>
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org09e23e8" class="outline-2">
+<h2 id="org09e23e8">Running our first build</h2>
+<div class="outline-text-2" id="text-org09e23e8">
+<p>
+Our final task is just to start a build of our Jenkins project. Simply click
+<b>Build now</b> in the project. Under <b>Build history</b> you will see the build
+running.
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_build_step1.png" alt="jenkins_build_step1.png">
+</p>
+</div>
+
+<p>
+You can follow the progress of the build by clicking on it and selecting <b>Console output</b>:
+</p>
+
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/jenkins_build_step2.png" alt="jenkins_build_step2.png">
+</p>
+</div>
+
+<p>
+And that's it! Now we have a Jenkins project that when built will:
+</p>
+
+<ul class="org-ul">
+<li>Clone a private GitHub repo</li>
+<li>Build a Docker-image from the repos Dockerfile</li>
+<li>Run a build script inside the Docker-container</li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-org5738ea0" class="outline-2">
+<h2 id="org5738ea0">And then?</h2>
+<div class="outline-text-2" id="text-org5738ea0">
+
+<div class="figure">
+<p><img src="assets/basic-jenkins-setup/and_then.png" alt="and_then.png">
+</p>
+</div>
+
+<p>
+You could install the <a href="https://wiki.jenkins-ci.org/display/JENKINS/GitHub+Plugin">GitHub Plugin</a> and configure the project to be built when a
+change is pushed to GitHub (a PR, a commit, etc). Or you could use the plugin
+to show the build status of PRs.
+</p>
+
+<p>
+You could install the <a href="https://wiki.jenkins-ci.org/display/JENKINS/Embeddable+Build+Status+Plugin">Embeddable Build Status Plugin</a> to allow a Jenkins build
+status badge to be shown on GitHub when viewing the README of the repository.
+</p>
+
+<p>
+You could install the <a href="https://wiki.jenkins-ci.org/display/JENKINS/GitHub+OAuth+Plugin">GitHub OAuth Plugin</a> to allow users to login on GitHub and
+be automatically authenticated on Jenkins.
+</p>
+
+<p>
+You could install the <a href="https://wiki.jenkins-ci.org/display/JENKINS/GitHub+Issues+Plugin">Github Issues Plugin</a> to allow Jenkins to create a issue on
+GitHub when a build fails.
+</p>
+
+<p>
+You could try out <a href="https://jenkins.io/doc/book/pipeline/">Jenkins Pipelines</a> to allow writing a <code>Jenkinsfile</code> file that
+defines how the project is built by Jenkins and is checked into the projects
+repository.
+</p>
+
+<p>
+You could try the <a href="https://jenkins.io/projects/blueocean/">Blue Ocean</a> plugin for a more modern Jenkins user interface:
+</p>
+
+
+<div class="figure">
+<p><img src="https:/jenkins.io/images/post-images/blueocean/pipeline-activity.png" alt="pipeline-activity.png">
+</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>
