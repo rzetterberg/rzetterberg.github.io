@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- 2017-08-15 Tue 12:51 -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setting up Kubernetes on NixOS</title>
+<meta name="generator" content="Org mode">
+<link rel="stylesheet" type="text/css" href="assets/common/htmlize.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/theme.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/main.css"/>
+</head>
+<body>
+<div id="org-div-home-and-up">
+ <a accesskey="h" href="../"> UP </a>
+ |
+ <a accesskey="H" href="/"> HOME </a>
+</div><div id="content">
+<div class="rz-header">
+  <img class="rz-logotype" src="assets/common/logotype.svg" />
+</div>
+<div class="rz-menu">
+  <ul>
+    <li><a href="index.html">To article list</a></li>
+  </ul>
+</div>
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-98746269-1', 'auto');
+  ga('send', 'pageview');
+</script>
+<dl class="org-dl">
+<dt>Published</dt><dd>2017-07-21</dd>
+<dt>NixOS release</dt><dd>17.03</dd>
+</dl>
+
+<p>
+This article will show you how to setup Kubernetes on your local NixOS machine
+and perform some common tasks such as starting containers and routing traffic
+to your running containers.
+</p>
+
+<p>
+This article assumes you know <a href="https://kubernetes.io/docs/concepts/">basic Kubernetes terminology</a> and will focus more
+on showing you "this is how you do it" and less on "this is how it works".
+For me, it was easier to understand the details of Kubernetes after I had
+configured and experimented with it a bit.
+</p>
+
+<p>
+In this article we will setup both a <code>master</code> and a <code>node</code> on the same machine
+for simplicity.
+</p>
+
+
+<div class="figure">
+<p><img src="assets/kubernetes-nixos/master-node-same-machine.png" alt="master-node-same-machine.png">
+</p>
+</div>
+
+<p>
+After reading this article you should know enough to setup a Kubernetes cluster
+on multiple machines on your local network.
+</p>
+
+
+<div class="figure">
+<p><img src="assets/kubernetes-nixos/master-node-separate.png" alt="master-node-separate.png">
+</p>
+</div>
+
+<div id="outline-container-orgaa08fb8" class="outline-2">
+<h2 id="orgaa08fb8">Installation</h2>
+<div class="outline-text-2" id="text-orgaa08fb8">
+<p>
+First of all, there isn't a single <code>master</code> and <code>node</code> systemd service. There
+are a few separate systemd services that together make up the functionality of
+<code>master</code> and <code>node</code>. The nice people of NixOS has decided to make our lives
+easier by allowing us to just add:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-fundamental">  services.kubernetes = {
+    roles = [<span style="color: #2aa889;">"master"</span> <span style="color: #2aa889;">"node"</span>];
+  };
+</pre>
+</div>
+
+<p>
+To our <code>configuration.nix</code> and all the underlying systemd services will be
+enabled and configured with sane defaults for us. After we have run
+<code>nixos-rebuild switch</code> all services should have been started and we should have
+the <code>kubectl</code> command available in our shell.
+</p>
+
+<p>
+To verify this, we can run the following command:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-fundamental">kubectl cluster-info
+</pre>
+</div>
+
+<p>
+We should see something like this:
+</p>
+
+<pre class="example">
+Kubernetes master is running at http://localhost:8080
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+</pre>
+
+<p>
+After that we are ready to start running stuff on our cluster!
+</p>
+
+<p>
+<b>NB:</b> if you have used <code>minikube</code> on your machine, it may have written
+configuration files to <code>$HOME/.kube</code> that will interfere with your NixOS setup.
+For example, it could have configured <code>kubectl</code> to use the the IP of the
+Virtualbox VM that <code>minikube</code> created, instead of <code>127.0.0.1</code>.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org0453b61" class="outline-2">
+<h2 id="org0453b61">Starting a deployment</h2>
+<div class="outline-text-2" id="text-org0453b61">
+<p>
+The first thing we will do is run a single <code>nginx</code> deployment run on 2
+containers on the cluster.
+We will do this by creating a <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Deployment</a> with 2 replicas
+(how many containers to start) and the port 80 exposed. Kubernetes will then
+take care of spinning up the containers and making sure they are always running,
+by restarting them if they fail.
+</p>
+
+<p>
+You can either create a <code>Deployment</code> by running <code>kubectl</code> with a bunch of command
+line arguments or you can create a declarative file with all the options. Guess
+which approach we will use?
+</p>
+
+<p>
+<code>YAML</code> is used in the declarative files for Kubernetes objects, but <code>JSON</code> is
+also accepted. The file for our <code>Deployment</code> will look like this:
+</p>
+
+<p>
+<b>nginx-deployment.yaml</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-yaml"><span style="color: #599cab;">apiVersion</span>: extensions/v1beta1
+<span style="color: #599cab;">kind</span>: Deployment
+<span style="color: #599cab;">metadata</span>:
+  <span style="color: #599cab;">name</span>: nginx-deployment
+<span style="color: #599cab;">spec</span>:
+  <span style="color: #599cab;">replicas</span>: 2
+  <span style="color: #599cab;">template</span>:
+    <span style="color: #599cab;">metadata</span>:
+      <span style="color: #599cab;">labels</span>:
+        <span style="color: #599cab;">app</span>: nginx
+    <span style="color: #599cab;">spec</span>:
+      <span style="color: #599cab;">containers</span>:
+        - <span style="color: #599cab;">name</span>: nginx
+          <span style="color: #599cab;">image</span>: nginx:1.7.9
+          <span style="color: #599cab;">ports</span>:
+            - <span style="color: #599cab;">containerPort</span>: 80
+</pre>
+</div>
+
+<p>
+This tells Kubernetes to start 2 containers from the given template that says:
+</p>
+
+<dl class="org-dl">
+<dt>Use Docker image</dt><dd><code>nginx:1.7.9</code></dd>
+<dt>Expose port</dt><dd><code>80</code></dd>
+<dt>Add label</dt><dd><code>app: nginx</code></dd>
+</dl>
+
+<p>
+After we saved the file we can create the <code>Deployment</code> object using <code>kubectl</code>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl create -f ./nginx-deployment.yaml
+</pre>
+</div>
+
+<p>
+After running that command we can check that the <code>Deployment</code> has been created
+by running:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl get deployments
+</pre>
+</div>
+
+<p>
+Which will show you something like this:
+</p>
+
+<pre class="example">
+NAME               DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+nginx-deployment   2         2         2            2           10s
+</pre>
+</div>
+</div>
+
+<div id="outline-container-org4c7fb21" class="outline-2">
+<h2 id="org4c7fb21">Show information</h2>
+<div class="outline-text-2" id="text-org4c7fb21">
+<p>
+We can show the details of this deployment by running:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl describe deployments
+</pre>
+</div>
+
+<p>
+Which will show you something like this:
+</p>
+
+<pre class="example">
+Name:                   nginx-deployment
+Namespace:              default
+CreationTimestamp:      Fri, 21 Jul 2017 14:07:42 +0200
+Labels:                 app=nginx
+Selector:               app=nginx
+Replicas:               2 updated | 2 total | 2 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  1 max unavailable, 1 max surge
+Conditions:
+  Type          Status  Reason
+  ----          ------  ------
+  Available     True    MinimumReplicasAvailable
+OldReplicaSets: &lt;none&gt;
+NewReplicaSet:  nginx-deployment-4087004473 (2/2 replicas created)
+Events:
+  FirstSeen     LastSeen        Count   From                            SubObjectPath   Type            Reason                  Message
+  ---------     --------        -----   ----                            -------------   --------        ------                  -------
+  10s           10s             2       {deployment-controller }                        Normal          ScalingReplicaSet       Scaled up replica set nginx-deployment-4087004473 to 2
+</pre>
+
+<p>
+To show the started pods we can run:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl get pods
+</pre>
+</div>
+
+<p>
+Which will show you something like this:
+</p>
+
+<pre class="example">
+NAME                                READY     STATUS    RESTARTS   AGE
+nginx-deployment-4087004473-ncskn   1/1       Running   0          25s
+nginx-deployment-4087004473-w6hsk   1/1       Running   0          25s
+</pre>
+
+<p>
+We can also show more details of the pod:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl describe pods
+</pre>
+</div>
+
+<p>
+Which will show details for each pod, note however that only one pod is shown
+here to avoid a wall of text:
+</p>
+
+<pre class="example">
+Name:           nginx-deployment-4087004473-ncskn
+Namespace:      kube-system
+Node:           **********
+Start Time:     Fri, 21 Jul 2017 14:07:42 +0200
+Labels:         app=nginx
+                pod-template-hash=4087004473
+Status:         Running
+IP:             10.10.0.11
+Controllers:    ReplicaSet/nginx-deployment-4087004473
+Containers:
+  nginx:
+    Container ID:       docker://a7afa58846d9925656058990cb555b6c958725db53636f6a27cda8dd62cf4c72
+    Image:              nginx:1.7.9
+    Image ID:           docker-pullable://nginx@sha256:e3456c851a152494c3e4ff5fcc26f240206abac0c9d794affb40e0714846c451
+    Port:               80/TCP
+    State:              Running
+      Started:          Fri, 21 Jul 2017 14:10:27 +0200
+    Last State:         Terminated
+      Reason:           Completed
+      Exit Code:        0
+      Started:          Fri, 21 Jul 2017 14:07:42 +0200
+      Finished:         Fri, 21 Jul 2017 14:10:26 +0200
+    Ready:              True
+    Restart Count:      1
+    Volume Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from default-token-n47xq (ro)
+    Environment Variables:      &lt;none&gt;
+Conditions:
+  Type          Status
+  Initialized   True
+  Ready         True
+  PodScheduled  True
+Volumes:
+  default-token-n47xq:
+    Type:       Secret (a volume populated by a Secret)
+    SecretName: default-token-n47xq
+QoS Class:      BestEffort
+Tolerations:    &lt;none&gt;
+Events:
+  FirstSeen     LastSeen        Count   From                            SubObjectPath           Type            Reason          Message
+  ---------     --------        -----   ----                            -------------           --------        ------          -------
+  25m           25m             1       {default-scheduler }                                    Normal          Scheduled       Successfully assigned nginx-deployment-4087004473-ncskn to workstation
+  25m           25m             1       {kubelet workstation}           spec.containers{nginx}  Normal          Created         Created container with docker id 15c7bbae047a; Security:[seccomp=unconfined]
+  25m           25m             1       {kubelet workstation}           spec.containers{nginx}  Normal          Started         Started container with docker id 15c7bbae047a
+  25m           22m             2       {kubelet workstation}           spec.containers{nginx}  Normal          Pulled          Container image "nginx:1.7.9" already present on machine
+  22m           22m             1       {kubelet workstation}           spec.containers{nginx}  Normal          Created         Created container with docker id a7afa58846d9; Security:[seccomp=unconfined]
+  22m           22m             1       {kubelet workstation}           spec.containers{nginx}  Normal          Started         Started container with docker id a7afa58846d9
+</pre>
+
+<p>
+As we can see we have a single pod running that has started a single Docker
+container. We can verify this by running <code>docker ps</code>:
+</p>
+
+<pre class="example">
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS                  PORTS               NAMES
+b4992e43b858        nginx:1.7.9         "nginx -g 'daemon ..."   28 seconds ago      Up 28 seconds                           k8s_nginx.9c713255_nginx-deployment-4087004473-342pq_kube-system_5ce8d790-5bfe-11e7-9006-08002727d39f_32a8edcb
+9343f3656c90        nginx:1.7.9         "nginx -g 'daemon ..."   28 seconds ago      Up 28 seconds                           k8s_nginx.9c713255_nginx-deployment-4087004473-342pq_kube-system_5ce8d790-5bfe-11e7-9006-08002727d39f_32a8edcb
+</pre>
+
+<p>
+<code>Deployment</code> takes care of starting new containers if they die, let's put that
+to the test:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">docker kill b4992e43b858
+</pre>
+</div>
+
+<p>
+Then we run <code>docker ps</code> again to check if there is a new container started:
+</p>
+
+<pre class="example">
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS                  PORTS               NAMES
+5ea5c41723c6        nginx:1.7.9         "nginx -g 'daemon ..."   17 seconds ago      Up 16 seconds                           k8s_nginx.9c713255_nginx-deployment-4087004473-342pq_kube-system_5ce8d790-5bfe-11e7-9006-08002727d39f_5ece527a
+9343f3656c90        nginx:1.7.9         "nginx -g 'daemon ..."   28 seconds ago      Up 28 seconds                           k8s_nginx.9c713255_nginx-deployment-4087004473-342pq_kube-system_5ce8d790-5bfe-11e7-9006-08002727d39f_32a8edcb
+</pre>
+
+<p>
+Lo and behold, a new container was started automatically!
+</p>
+</div>
+</div>
+
+<div id="outline-container-org6093cf9" class="outline-2">
+<h2 id="org6093cf9">Accessing nginx</h2>
+<div class="outline-text-2" id="text-org6093cf9">
+<p>
+Next step is to access nginx to make sure it is running and working as expected.
+A newly started nginx should show you the default start page for all requests.
+</p>
+
+<p>
+Lets find out what our pod is called:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl get pods
+</pre>
+</div>
+
+<p>
+You should see something like this:
+</p>
+
+<pre class="example">
+NAME                                READY     STATUS    RESTARTS   AGE
+nginx-deployment-4087004473-342pq   1/1       Running   1          7m
+nginx-deployment-4087004473-w6hsk   1/1       Running   0          25s
+</pre>
+
+<p>
+Then lets find out what IP the pod have so that we can connect to it using our
+web browser:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl describe pods nginx-deployment-4087004473-342pq | grep IP
+</pre>
+</div>
+
+<p>
+You should see something like this:
+</p>
+
+<pre class="example">
+IP:             10.10.0.11
+</pre>
+
+<p>
+Let's open that address in our web browser:
+</p>
+
+
+<div class="figure">
+<p><img src="./assets/kubernetes-nixos/nginx-default-page.png" alt="nginx-default-page.png">
+</p>
+</div>
+
+<p>
+It works!
+</p>
+</div>
+</div>
+
+<div id="outline-container-orgf2445f3" class="outline-2">
+<h2 id="orgf2445f3">Changing a deployment</h2>
+<div class="outline-text-2" id="text-orgf2445f3">
+<p>
+Let's change our deployment to have 3 containers that runs nginx so that we can
+load balance connections between those 3 containers. We change the value
+<code>replicas</code> to 3 in our configuration file:
+</p>
+
+<p>
+<b>nginx-deployment.yaml</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-yaml"><span style="color: #599cab;">apiVersion</span>: extensions/v1beta1
+<span style="color: #599cab;">kind</span>: Deployment
+<span style="color: #599cab;">metadata</span>:
+  <span style="color: #599cab;">name</span>: nginx-deployment
+<span style="color: #599cab;">spec</span>:
+  <span style="color: #599cab;">replicas</span>: 3
+  <span style="color: #599cab;">template</span>:
+    <span style="color: #599cab;">metadata</span>:
+      <span style="color: #599cab;">labels</span>:
+        <span style="color: #599cab;">app</span>: nginx
+    <span style="color: #599cab;">spec</span>:
+      <span style="color: #599cab;">containers</span>:
+        - <span style="color: #599cab;">name</span>: nginx
+          <span style="color: #599cab;">image</span>: nginx:1.7.9
+          <span style="color: #599cab;">ports</span>:
+            - <span style="color: #599cab;">containerPort</span>: 80
+</pre>
+</div>
+
+<p>
+Instead of using the <code>create</code> command, we instead use <code>apply</code> to change an
+already existing <code>Deployment</code>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl apply -f ./nginx-deployment.yaml
+</pre>
+</div>
+
+<p>
+After running <code>apply</code> we can make sure there are 3 pods:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl get pods
+</pre>
+</div>
+
+<p>
+You should see:
+</p>
+
+<pre class="example">
+NAME                                READY     STATUS    RESTARTS   AGE
+nginx-deployment-4087004473-342pq   1/1       Running   1          39m
+nginx-deployment-4087004473-w6hsk   1/1       Running   0          39m
+nginx-deployment-4087004473-nwssb   1/1       Running   0          10s
+</pre>
+
+<p>
+Now that we have 3 pods we will also have 3 IPs:
+</p>
+
+<pre class="example">
+$ kubectl describe pods | grep IP
+IP:             10.10.0.11
+IP:             10.10.0.12
+IP:             10.10.0.13
+</pre>
+
+<p>
+To allow outside communication that is load balanced between the 3 pods
+we need to define a <code>Service</code>. A <code>Service</code> creates a single endpoint that
+you can connect to that is load balanced across multiple pods.
+</p>
+
+<p>
+<b>nginx-service.yaml</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-yaml"><span style="color: #599cab;">apiVersion</span>: v1
+<span style="color: #599cab;">kind</span>: Service
+<span style="color: #599cab;">metadata</span>:
+  <span style="color: #599cab;">name</span>: my-nginx
+  <span style="color: #599cab;">labels</span>:
+    <span style="color: #599cab;">run</span>: my-nginx
+<span style="color: #599cab;">spec</span>:
+  <span style="color: #599cab;">ports</span>:
+    - <span style="color: #599cab;">port</span>: 80
+      <span style="color: #599cab;">protocol</span>: TCP
+  <span style="color: #599cab;">selector</span>:
+    <span style="color: #599cab;">app</span>: nginx
+</pre>
+</div>
+
+<p>
+Notice the <code>selector</code> attribute. That's the attribute that is used to connect
+a service with pods under a <code>Deployment</code>.
+</p>
+
+<p>
+After creating the service:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl create -f ./nginx-service.yaml
+</pre>
+</div>
+
+<p>
+We can check that it exists:
+</p>
+
+<pre class="example">
+$ kubectl get services
+NAME       CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+my-nginx   10.10.10.101   &lt;none&gt;        80/TCP    1m
+</pre>
+
+<p>
+If we then try out the service by opening its IP in our web browser:
+</p>
+
+
+<div class="figure">
+<p><img src="./assets/kubernetes-nixos/nginx-default-page-service.png" alt="nginx-default-page-service.png">
+</p>
+</div>
+
+<p>
+We see that it works.
+</p>
+
+<p>
+We can delete the service by using the same configuration file:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash">kubectl delete -f ./nginx-service.yaml
+</pre>
+</div>
+
+<p>
+Now we will not be able to access the service using IP <code>10.10.10.101</code> any longer.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org9800a0c" class="outline-2">
+<h2 id="org9800a0c">The end</h2>
+<div class="outline-text-2" id="text-org9800a0c">
+<p>
+That's the gist of setting up Kubernetes on NixOS for experimentation.
+</p>
+</div>
+</div>
+</div>
+</body>
+</html>

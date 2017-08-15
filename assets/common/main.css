@@ -10,6 +10,11 @@ pre {
   overflow: auto;
 }
 
+img {
+  display: block;
+  margin: 0 auto;
+}
+
 #org-div-home-and-up {
   display: none;
 }

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 2017-05-08 Mon 12:04 -->
+<!-- 2017-08-15 Tue 12:51 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Teensy development on NixOS</title>
@@ -58,9 +58,9 @@ For this article to make most sense you should be familiar with using NixOS,
 GNU Make and GCC.
 </p>
 
-<div id="outline-container-orgb9eefdb" class="outline-2">
-<h2 id="orgb9eefdb">Dependencies</h2>
-<div class="outline-text-2" id="text-orgb9eefdb">
+<div id="outline-container-org554692b" class="outline-2">
+<h2 id="org554692b">Dependencies</h2>
+<div class="outline-text-2" id="text-org554692b">
 <p>
 I wanted to setup a project where I could write code for the device itself, but
 also unit tests that ran on my host.
@@ -149,9 +149,9 @@ Arduino IDE.
 </div>
 </div>
 
-<div id="outline-container-org02e6818" class="outline-2">
-<h2 id="org02e6818">Teensy core library build</h2>
-<div class="outline-text-2" id="text-org02e6818">
+<div id="outline-container-org4912f3d" class="outline-2">
+<h2 id="org4912f3d">Teensy core library build</h2>
+<div class="outline-text-2" id="text-org4912f3d">
 <p>
 First off, to make a device Arduino compatible you need to create an Arduino
 core library implementation.
@@ -243,9 +243,9 @@ using the flag <code>-T[short name].ld</code>, so I used the flag: <code>-Tmk20d
 </div>
 </div>
 
-<div id="outline-container-orgd425517" class="outline-2">
-<h2 id="orgd425517">Teensy core library derivation</h2>
-<div class="outline-text-2" id="text-orgd425517">
+<div id="outline-container-org66d950b" class="outline-2">
+<h2 id="org66d950b">Teensy core library derivation</h2>
+<div class="outline-text-2" id="text-org66d950b">
 <p>
 The <code>Makefile</code> above produces object files for all <i>C and C++</i> files it finds
 in the current directory.
@@ -415,9 +415,9 @@ in
 </div>
 </div>
 
-<div id="outline-container-orgdfb63eb" class="outline-2">
-<h2 id="orgdfb63eb">Using the Teensy core library</h2>
-<div class="outline-text-2" id="text-orgdfb63eb">
+<div id="outline-container-orgda59ac8" class="outline-2">
+<h2 id="orgda59ac8">Using the Teensy core library</h2>
+<div class="outline-text-2" id="text-orgda59ac8">
 <p>
 I could then update my <code>default.nix</code> definition to include the teensy3
 core library as a dependency with the right values for my board:
@@ -469,9 +469,9 @@ $ nix-shell
 </div>
 </div>
 
-<div id="outline-container-org130c75d" class="outline-2">
-<h2 id="org130c75d">Compiling the project</h2>
-<div class="outline-text-2" id="text-org130c75d">
+<div id="outline-container-org0491771" class="outline-2">
+<h2 id="org0491771">Compiling the project</h2>
+<div class="outline-text-2" id="text-org0491771">
 <p>
 To actually build the project I created a <code>Makefile</code> that included the <code>flags.mk</code>
 file from <code>teensy3-core</code>, to avoid having to type all the flags again:
@@ -564,9 +564,9 @@ Hopefully this article have been useful to someone else!
 </div>
 </div>
 
-<div id="outline-container-org6f808d1" class="outline-2">
-<h2 id="org6f808d1">The code</h2>
-<div class="outline-text-2" id="text-org6f808d1">
+<div id="outline-container-orgd3fc803" class="outline-2">
+<h2 id="orgd3fc803">The code</h2>
+<div class="outline-text-2" id="text-orgd3fc803">
 <p>
 If you didn't read the article and just want to get the code you can <a href="./code/teensy-development-on-nixos.tar.gz">download
 it here</a>.
