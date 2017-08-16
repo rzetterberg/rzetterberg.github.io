@@ -1,0 +1,80 @@
+==================================================================
+https://keybase.io/rzetterberg
+--------------------------------------------------------------------
+
+I hereby claim:
+
+  * I am an admin of https://rzetterberg.github.io
+  * I am rzetterberg (https://keybase.io/rzetterberg) on keybase.
+  * I have a public key with fingerprint 0990 A379 D621 606A 247A  8D91 CE33 2F5F EBB7 E54C
+
+To do so, I am signing this object:
+
+{
+  "body": {
+    "key": {
+      "eldest_kid": "010183d0710e537d658e570a440e8208d12640f64e8f589bb2d88da1beebd50edea50a",
+      "fingerprint": "0990a379d621606a247a8d91ce332f5febb7e54c",
+      "host": "keybase.io",
+      "key_id": "ce332f5febb7e54c",
+      "kid": "010183d0710e537d658e570a440e8208d12640f64e8f589bb2d88da1beebd50edea50a",
+      "uid": "75e66a9480cb779b2ab174e18e257519",
+      "username": "rzetterberg"
+    },
+    "merkle_root": {
+      "ctime": 1502862873,
+      "hash_meta": "5b1b05fd3ce0a69d13485ab1d0ed2f0281e4d64b163ad9bf5031b18563e57a16",
+      "seqno": 1328731
+    },
+    "revoke": {
+      "sig_ids": [
+        "2fbe23c5a5bf2a6d295a71d40181fa0fa4517cf6b754eb304582d84b536c559f0f"
+      ]
+    },
+    "service": {
+      "hostname": "rzetterberg.github.io",
+      "protocol": "https:"
+    },
+    "type": "web_service_binding",
+    "version": 1
+  },
+  "ctime": 1502863051,
+  "expire_in": 157680000,
+  "prev": "c57e7ec94cd8bfa1799f2f6eb6591fe349fe5c344d5458338154d0261636e3b6",
+  "seqno": 5,
+  "tag": "signature"
+}
+
+which yields the signature:
+
+-----BEGIN PGP MESSAGE-----
+
+owGtU39oVVUcfy/N5khraUnEGl1Ek9Y4554f99zH/pgVaaVRsVpZ63bOPd/zdtv2
+7uu+u7WpayMImQQ6LSKdBBYUsrQUSRzEIhEiYmQ/tPVQQ0ETFgSbBNKPc1dCUX92
+/zncw+fX93PO2b5oXq4mP7Pr9c2fpgd35T//UeWe2nn65CZHxbrfKWxyOmFugS4N
+lTTojLRTcBBGWBCNPIyAEU9zJoB5SFKKQLhIaOxyigynIAwTvlKuFkJLrACUZgg0
+SIak0+iYqFSEpJxEpTST9X0kiedr7mKOuHSpJ4X2cQiEuIYZUMoDRkNL7IgrGcOG
+U7ICTVFs9+xPMBfvP/D/c+6eOTmPAefSpwKFyvN85UqFPQpYgMs8hv0MWIGkJLvB
+opONkKaQKEiKzkCj0w1JZxcESRynWb9hGmUozJAruCs8YmeUlY6gG1JpyUxhhZjR
+JAQkua8xoYJZO21DucZyMFDNqcKcSO0rwxDBCgvGiR1QYm6jVOCFUmwdSKaObYIE
+euNOyMwrUdE2V3EKTzvuxMtGgUtCJpkyruTa9Zn0sKa2OmwkMpIy7IWGK49RUARR
+JmxNVDHCQ8Z8g4zTPpDZJb1ROCefHda/S2gqRmlHj/rz7MpJnMZh3GUhHWlarhSy
+itL+csZ5EVTwl1qgopK2d8YyeiGpRHHJDmSR/2iPIIYbHegrRwkEUYZgHhfIfpkP
+9GY3hHngQejTUAtlJPZ837iGg+LMxwYI9Q2wkFCqmR2PEIEZ1cjltl4ORP2tTmZj
+yqKVtB2WZNqTgDNQO5wn83P5mlz9LXfMn1p/5MiBoZklX7w0Pn71mV17TfbGcrUL
+b7y6031nTe6N6tKxPRcGHy5+dGzP3jUPthaDm0YOb/9tyQ21J68PrrSdnxhfPdWw
+rn92ZN7Y4ebnP2tdWb9oum7LyOiV0R2/rLp0aduK4dVL65oXfP9N+5dPjNXun3Qe
+faC57ZVnhy/sr959ub76/prvbp8evFh8rOXnrxcf+GS26YP12y7uO/3ID831Tx4K
+Wt/esI/LBX2z5FR+2dSpE/ngePjMmzP9752fPnfitlUTi8/c4zjLdy+/vDP3a9PG
+t+6ru/Xsa/fvHmy5+czZ6iG0pX2SPnds7bc98cirj7+zoWeqbeqhhoafhu5F1x0v
+uGvFuZXjd3188N2OYbZ1xYdHJ7ce/X3ZiFk41CdGq52bW5r21n21Y534Aw==
+=r48i
+-----END PGP MESSAGE-----
+
+And finally, I am proving ownership of this host by posting or
+appending to this document.
+
+View my publicly-auditable identity here: https://keybase.io/rzetterberg
+
+==================================================================
+
