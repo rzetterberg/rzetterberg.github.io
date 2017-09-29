@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- 2017-09-29 Fri 16:11 -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setting up GnuPG + Yubikey on NixOS for SSH authentication</title>
+<meta name="generator" content="Org mode">
+<link rel="stylesheet" type="text/css" href="assets/common/htmlize.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/theme.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/main.css"/>
+</head>
+<body>
+<div id="org-div-home-and-up">
+ <a accesskey="h" href="../"> UP </a>
+ |
+ <a accesskey="H" href="/"> HOME </a>
+</div><div id="content">
+<div class="rz-header">
+  <img class="rz-logotype" src="assets/common/logotype.svg" />
+</div>
+<div class="rz-menu">
+  <ul>
+    <li><a href="index.html">To article list</a></li>
+  </ul>
+</div>
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-98746269-1', 'auto');
+  ga('send', 'pageview');
+</script>
+<dl class="org-dl">
+<dt>Published</dt><dd>2017-09-29</dd>
+<dt>NixOS release</dt><dd>17.03</dd>
+</dl>
+
+<p>
+In this article we will setup NixOS to use <a href="https://gnupg.org/">GPG</a>-keys for SSH authentication,
+while storing the keys securely on a <a href="https://www.yubico.com/products/yubikey-hardware/yubikey4/">Yubikey</a>. When I did this myself, I had to
+read a lot of different sources to understand all the steps of this process.
+So to save some time for someone else I compiled all these details into a
+(hopefully) comprehensible article.
+</p>
+
+<div id="outline-container-org65fc697" class="outline-2">
+<h2 id="org65fc697">GPG basics</h2>
+<div class="outline-text-2" id="text-org65fc697">
+<p>
+A SSH key pair consists of a public key (stored on the server) and a
+private key (stored on the client). The anatomy of these keys are simple,
+they are just RSA keys that don't contain any meta data used in the
+authentication process.
+</p>
+</div>
+
+<div id="outline-container-orgc47152f" class="outline-3">
+<h3 id="orgc47152f">Anatomy of GPG keys</h3>
+<div class="outline-text-3" id="text-orgc47152f">
+<p>
+GPG <i>keys</i> on the other hand, are much more complex, they are more like a data
+structure with different components than a "key". In essence a GPG key consists
+of 4 parts:
+</p>
+
+<dl class="org-dl">
+<dt>Primary key pair</dt><dd>Also called <i>master key</i></dd>
+<dt>Primary identity</dt><dd>Also just called <i>user identity</i> or <i>uid</i></dd>
+<dt>Extra identities</dt><dd>Extra user identities linked to the primary key pair</dd>
+<dt>Subkey pairs</dt><dd>Extra keys derived from the primary key pair</dd>
+</dl>
+
+
+<div class="figure">
+<p><img src="assets/yubikey-gpg-nixos/key-anatomy1.png" alt="key-anatomy1.png">
+</p>
+</div>
+
+<p>
+In earlier versions when you created a GPG key, it would only consist of
+the primary key pair and the primary identity. Which probably why it is called
+a GPG key, and not something like GPG structure or object.
+</p>
+</div>
+
+<div id="outline-container-org9f6e0ce" class="outline-4">
+<h4 id="org9f6e0ce">Identities</h4>
+<div class="outline-text-4" id="text-org9f6e0ce">
+<p>
+When you create a new GPG key, you are asked for the name and email of the
+user that they key belongs to. When creating the actual the GPG key, a
+signature is created from the name and email using the primary private key.
+This way the identity is <i>associated</i> with the primary key pair.
+</p>
+
+<p>
+The extra identities is there so that you can associate other email adresses
+to your primary key pair. For example, you might want to have both your private
+and work email associated with the key for simplicity.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org6c8303e" class="outline-4">
+<h4 id="org6c8303e">Subkey pairs</h4>
+<div class="outline-text-4" id="text-org6c8303e">
+<p>
+Subkey pairs are basically normal key pairs that has a signature that
+associates them to the primary key pair. When a subkey pair is created, the
+primary private key is used to create this signature.
+</p>
+
+<p>
+The reason why you would want to create subkey pairs is because in GPG you
+can specify what actions a key pair is allowed to perform. There are 4
+different actions a key pair can perform. The most powerful action is called
+<b>Certify</b>, which allows a key pair to create subkey pairs from itself. A subkey
+pair is just a key pair but with a signature that associates it to another key
+pair. The primary key pair will therefor always have the <b>Certify</b> capability,
+so that it can create subkey pairs.
+</p>
+
+<p>
+There are 3 other actions a key pair can perform:
+</p>
+
+<dl class="org-dl">
+<dt>Sign</dt><dd>Signing files, emails, etc.</dd>
+<dt>Encrypt</dt><dd>Encrypting files, emails, etc.</dd>
+<dt>Authenticate</dt><dd>Authenticating against external services, such as SSH</dd>
+</dl>
+
+<p>
+Normally you remove all actions but the <b>Certify</b> action from the primary key
+pair and then create subkey pairs for each of the other 3 actions. This way you
+can use the 3 subkey pairs in your day-to-day work, and store the primary key
+pair offline safely.
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-orgfe69ead" class="outline-3">
+<h3 id="orgfe69ead">Smart cards</h3>
+<div class="outline-text-3" id="text-orgfe69ead">
+<p>
+A smart card (like Yubikey) is basically a physical device that can store
+private keys and perform the cryptographic operations directly on the device.
+Smart cards are designed so that once the private keys are imported to the
+device they cannot be extracted.
+</p>
+
+<p>
+So if your computer would become compromised, the attacker would not be able to
+get the private key since it is stored outside the computer and no
+cryptographic operations are performed on the computer. The only thing
+the attacker would be able to extract is the input and output of the device.
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org2317ec9" class="outline-2">
+<h2 id="org2317ec9">Our goal</h2>
+<div class="outline-text-2" id="text-org2317ec9">
+<p>
+Now that we better understand how GPG works, lets define the goal of this
+article:
+</p>
+
+<ul class="org-ul">
+<li>Create a GPG key
+<ul class="org-ul">
+<li>With a primary keypair that can only <b>Certify</b></li>
+<li>With a single user identity</li>
+<li>With a subkey pair that can only <b>Sign</b></li>
+<li>With a subkey pair that can only <b>Encrypt</b></li>
+<li>With a subkey pair that can only <b>Authenticate</b></li>
+</ul></li>
+<li>Backup the primary key pair and it's subkey pairs offline on a USB-stick</li>
+<li>Configure our Yubikey</li>
+<li>Move the 3 subkey pairs to our Yubikey</li>
+<li>Configure NixOS to use GPG and our Yubikey for SSH authentication:</li>
+</ul>
+
+
+<div class="figure">
+<p><img src="assets/yubikey-gpg-nixos/key-usage.png" alt="key-usage.png">
+</p>
+<p><span class="figure-number">Figure 2: </span>Agent replacement</p>
+</div>
+
+<p>
+Lets start by creating our new key!
+</p>
+</div>
+</div>
+
+<div id="outline-container-orge0f424a" class="outline-2">
+<h2 id="orge0f424a">Creating a new key</h2>
+<div class="outline-text-2" id="text-orge0f424a">
+<p>
+All key creation should be performed on a live booted machine without network
+access. A common way is to live boot <a href="https://tails.boum.org/">Tails</a> and perform all key generation steps
+inside it. Then copy the generated keys to a USB-stick that is kept in a safe
+place offline. From here on out all commands should be performed on a live
+booted Tail machine without network access.
+</p>
+
+<p>
+Like mentioned in the goals section, we'll start by creating a GPG key that
+has primary key pair that can only <b>Certify</b>. To start the process we run:
+</p>
+
+<pre class="example">
+$ gpg2 --expert --full-generate-key
+</pre>
+
+<p>
+(We use the flag <code>--expert</code> and <code>--full-generate-key</code> to get all available
+options when generating our key.)
+</p>
+
+<p>
+The first prompt asks what kind of key
+we want to generate, here we select <b>(8) RSA (set your own capabilities)</b>,
+so that we get to choose what actions the key can perform. In the actions
+prompt we untoggle all actions except for <b>Certify</b>. In the keysize prompt
+we input <b>4096</b> bits. The Yubikey <a href="https://www.yubico.com/support/knowledge-base/categories/articles/use-yubikey-openpgp/#generatelocal">supports storing keys that are 4096-bits</a>
+so we will use 4096 bits on all key pairs.
+</p>
+
+<p>
+After the GPG key has been created we can verify that it actually exists:
+</p>
+
+<pre class="example">
+$ gpg2 --list-keys
+gpg: checking the trustdb
+gpg: marginals needed: 3  completes needed: 1  trust model: pgp
+gpg: depth: 0  valid:   1  signed:   0  trust: 0-, 0q, 0n, 0m, 0f, 1u
+gpg: next trustdb check due at 2018-09-17
+/home/me/.gnupg/pubring.kbx
+----------------------------
+pub   rsa4096 2017-09-17 [C] [expires: 2018-09-17]
+      FAB89F7D27C399063F600B036B3D0050CAE0C3C4
+uid           [ultimate] Richard Zetterberg &lt;richard.zetterberg@example.com&gt;
+</pre>
+
+<p>
+Next step is to create our 3 subkey pairs from that primary key pair. We use
+the key ID from the previous step and run:
+</p>
+
+<pre class="example">
+$ gpg2 --expert --edit-key FAB89F7D27C399063F600B036B3D0050CAE0C3C4
+</pre>
+
+<p>
+When starting that command we are presented with a overview of the key and
+a <code>gpg&gt;</code> prompt that accept commands. We start by entering:
+</p>
+
+<pre class="example">
+gpg&gt; addkey
+</pre>
+
+<p>
+We are now shown the key creation prompt again. This time we also select
+<b>(8) RSA (set your own capabilities)</b> for key type. However, this time we
+only select <b>Sign</b> capability. Same key size as before, 4096-bits.
+</p>
+
+<p>
+After creating our <b>Sign</b> subkey, we should see the overview and the <code>gpg&gt;</code>
+command prompt again:
+</p>
+
+<pre class="example">
+sec  rsa4096/6B3D0050CAE0C3C4
+     created: 2017-09-17  expires: 2018-09-17  usage: C
+     trust: ultimate      validity: ultimate
+ssb  rsa4096/425E1FD67112482A
+     created: 2017-09-17  expires: 2018-09-17  usage: S
+[ultimate] (1). Richard Zetterberg &lt;richard.zetterberg@example.com&gt;
+
+gpg&gt;
+</pre>
+
+<p>
+By the way, when gpg list keys, it uses the following terminology:
+</p>
+
+<dl class="org-dl">
+<dt>sec</dt><dd>SECret key</dd>
+<dt>ssb</dt><dd>Secret SuBkey</dd>
+<dt>pub</dt><dd>PUBlic key</dd>
+<dt>sub</dt><dd>public SUBkey</dd>
+</dl>
+
+<p>
+Next we perform the same <code>addkey</code> steps for the separate <b>Encrypt</b> and
+<b>Authenticate</b> keys. When done we should see this:
+</p>
+
+<pre class="example">
+sec  rsa4096/6B3D0050CAE0C3C4
+     created: 2017-09-17  expires: 2018-09-17  usage: C
+     trust: ultimate      validity: ultimate
+ssb  rsa4096/425E1FD67112482A
+     created: 2017-09-17  expires: 2018-09-17  usage: S
+ssb  rsa4096/5993DBCB1C9AC33B
+     created: 2017-09-17  expires: 2018-09-17  usage: E
+ssb  rsa4096/8DB918AB30C19F1C
+     created: 2017-09-17  expires: 2018-09-17  usage: A
+[ultimate] (1). Richard Zetterberg &lt;richard.zetterberg@example.com&gt;
+
+gpg&gt;
+</pre>
+
+<p>
+We then save our changes:
+</p>
+
+<pre class="example">
+gpg&gt; quit
+Save changes? (y/N) y
+</pre>
+
+<p>
+Now when listing keys we will see our primary key pair and 3 subkey pairs:
+</p>
+
+<pre class="example">
+$ gpg2 --list-keys
+/home/me/.gnupg/pubring.kbx
+----------------------------
+pub   rsa4096 2017-09-17 [C] [expires: 2018-09-17]
+      FAB89F7D27C399063F600B036B3D0050CAE0C3C4
+uid           [ultimate] Richard Zetterberg &lt;richard.zetterberg@example.com&gt;
+sub   rsa4096 2017-09-17 [S] [expires: 2018-09-17]
+sub   rsa4096 2017-09-17 [E] [expires: 2018-09-17]
+sub   rsa4096 2017-09-17 [A] [expires: 2018-09-17]
+</pre>
+</div>
+</div>
+
+<div id="outline-container-org7e2a083" class="outline-2">
+<h2 id="org7e2a083">Backing up the keys</h2>
+<div class="outline-text-2" id="text-org7e2a083">
+<p>
+Next we mount our USB-stick that we will back up our keys on and export the
+keys by running:
+</p>
+
+<pre class="example">
+$ gpg2 --armor --output /path/to/usb/stick/secret-keys.txt \
+    --export-secret-key richard.zetterberg@example.com
+</pre>
+
+<p>
+This will export both the primary key and all its subkeys. Now we can unmount
+the USB-stick and store that in a safe place.
+</p>
+
+<p>
+Before storing our public keys on our Yubikey, we need to remove
+the primary key from our GPG key so that it only exists offline on our
+USB-stick. To do this we:
+</p>
+
+<ul class="org-ul">
+<li>Export subkeys only</li>
+<li>Delete the whole key</li>
+<li>Re-import the exported subkeys</li>
+</ul>
+
+<p>
+This will leave us with a GPG key that has all 3 subkeys but not the primary
+key.
+</p>
+
+<p>
+First we export the subkeys:
+</p>
+
+<pre class="example">
+$ gpg2 --armor --output ./secret-subkeys.txt \
+    --export-secret-subkeys richard.zetterberg@example.com
+</pre>
+
+<p>
+Then we delete the whole key:
+</p>
+
+<pre class="example">
+$ gpg2 --delete-secret-key richard.zetterberg@example.com
+</pre>
+
+<p>
+We answer <i>Delete key</i> for all prompts that ask if we should delete the subkeys.
+After doing this we should not see any keys when running <code>gpg2 --list-keys</code>.
+</p>
+
+<p>
+Finally we import the subkeys again:
+</p>
+
+<pre class="example">
+$ gpg2 --import ./secret-subkeys.txt
+</pre>
+
+<p>
+After the subkeys have been imported we should see the following when running
+<code>gpg2 --list-secret-keys</code>:
+</p>
+
+<pre class="example">
+$ gpg2 --list-secret-keys
+/home/me/.gnupg/pubring.kbx
+----------------------------
+sec#  rsa4096 2017-09-17 [C] [expires: 2018-09-17]
+      FAB89F7D27C399063F600B036B3D0050CAE0C3C4
+uid           [ultimate] Richard Zetterberg &lt;richard.zetterberg@example.com&gt;
+ssb   rsa4096 2017-09-17 [S] [expires: 2018-09-17]
+ssb   rsa4096 2017-09-17 [E] [expires: 2018-09-17]
+ssb   rsa4096 2017-09-17 [A] [expires: 2018-09-17]
+</pre>
+
+<p>
+Note that instead of saying <b>sec</b>, it now says <b>sec#</b>. This means that the
+key is not stored somewhere else. Now we are ready to store the subkeys on
+our Yubikey.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org7f53c19" class="outline-2">
+<h2 id="org7f53c19">Importing subkeys on Yubikey</h2>
+<div class="outline-text-2" id="text-org7f53c19">
+<p>
+Before importing the subkeys on our Yubikey we need to configure it. We plug
+in the Yubikey and check that we can communicate with it:
+</p>
+
+<pre class="example">
+$ gpg-connect-agent --hex "scd apdu 00 f1 00 00" /bye
+D[0000]  04 03 04 90 00                                     .....
+OK
+</pre>
+
+<p>
+We then configure the Yubikey to be used as a <a href="https://en.wikipedia.org/wiki/Smart_card">Smart card</a>:
+</p>
+
+<pre class="example">
+$ ykpersonalize -m82
+Firmware version 4.3.4 Touch level 773 Program sequence 1
+
+The USB mode will be set to: 0x82
+
+Commit? (y/n) [n]: y
+</pre>
+
+<p>
+Now that the Yubikey is configured as a smart card, we can import our subkeys
+to it, by running <code>--edit-key</code> for our key:
+</p>
+
+<pre class="example">
+$ gpg2 --edit-key FAB89F7D27C399063F600B036B3D0050CAE0C3C4
+gpg (GnuPG) 2.1.18; Copyright (C) 2017 Free Software Foundation, Inc.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Secret key is available.
+
+pub  rsa4096/6B3D0050CAE0C3C4
+     created: 2017-09-17  expires: 2018-09-17  usage: C
+     trust: ultimate      validity: ultimate
+ssb  rsa4096/425E1FD67112482A
+     created: 2017-09-17  expires: 2018-09-17  usage: S
+ssb  rsa4096/5993DBCB1C9AC33B
+     created: 2017-09-17  expires: 2018-09-17  usage: E
+ssb  rsa4096/8DB918AB30C19F1C
+     created: 2017-09-17  expires: 2018-09-17  usage: A
+[ultimate] (1). Richard Zetterberg &lt;richard.zetterberg@example.com&gt;
+
+gpg&gt;
+</pre>
+
+<p>
+In the <code>gpg&gt;</code> prompt we type:
+</p>
+
+<pre class="example">
+gpg&gt; key 1
+gpg&gt; keytocard
+</pre>
+
+<p>
+This will select the first subkey and import it to our Yubikey. Gpg will ask us
+where to store it, we just select the appropriate usage. When storing the key on
+the Yubikey we will be asked for the admin pin, which is <b>12345678</b> by factory
+default (<a href="https://developers.yubico.com/PGP/Card_edit.html">here's how you change it</a>).
+</p>
+
+<p>
+We then import the second subkey:
+</p>
+
+<pre class="example">
+gpg&gt; key 2
+gpg&gt; keytocard
+</pre>
+
+<p>
+And the last subkey:
+</p>
+
+<pre class="example">
+gpg&gt; key 3
+gpg&gt; keytocard
+</pre>
+
+<p>
+After all 3 keys have been imported we quit and save:
+</p>
+
+<pre class="example">
+gpg&gt; quit
+Save changes? (y/N) y
+</pre>
+
+<p>
+Now the subkeys have been moved from the live booted computer into the Yubikey.
+If we list the keys we will see that they now are pointers to a smart card and
+not stored locally:
+</p>
+
+<pre class="example">
+$ gpg2 --list-secret-keys
+/home/me/.gnupg/pubring.kbx
+----------------------------
+sec#  rsa4096 2017-09-17 [C] [expires: 2018-09-17]
+      FAB89F7D27C399063F600B036B3D0050CAE0C3C4
+uid           [ultimate] Richard Zetterberg &lt;richard.zetterberg@example.com&gt;
+ssb&gt;  rsa4096 2017-09-17 [S] [expires: 2018-09-17]
+ssb&gt;  rsa4096 2017-09-17 [E] [expires: 2018-09-17]
+ssb&gt;  rsa4096 2017-09-17 [A] [expires: 2018-09-17]
+</pre>
+
+<p>
+The <b>&gt;</b> suffix signifies "pointer to key".
+</p>
+</div>
+</div>
+
+<div id="outline-container-orgf995fa3" class="outline-2">
+<h2 id="orgf995fa3">Using the Yubikey</h2>
+<div class="outline-text-2" id="text-orgf995fa3">
+<p>
+Now that the Yubikey has been configured and contains the subkeys we can start
+using it. To test this out we first need to export the public key:
+</p>
+
+<pre class="example">
+$ gpg2 --armor --export richard.zetterberg@example.com &gt; public_key
+</pre>
+
+<p>
+To simulate that we want to start using our Yubikey on a new computer we
+remote the <code>.gnupg</code> directory:
+</p>
+
+<pre class="example">
+rm -rf ~/.gnupg
+</pre>
+
+<p>
+Now when we run <code>gpg2 --list-secret-keys</code> or <code>gpg2 --list-keys</code> we will not see
+any keys:
+</p>
+
+<pre class="example">
+$ gpg2 --list-secret-keys
+gpg: directory '/home/me/.gnupg' created
+gpg: new configuration file '/home/me/.gnupg/dirmngr.conf' created
+gpg: new configuration file '/home/me/.gnupg/gpg.conf' created
+gpg: keybox '/home/me/.gnupg/pubring.kbx' created
+$ gpg2 --list-keys
+</pre>
+
+<p>
+To start using the Yubikey on a new computer we need the public key. Sadly the
+Yubikey cannot store the public key, so we either need to bring it with us to
+the new computer or host it somewhere on the internet.
+</p>
+</div>
+
+<div id="outline-container-orge24906f" class="outline-3">
+<h3 id="orge24906f">Bringing the public key along</h3>
+<div class="outline-text-3" id="text-orge24906f">
+<p>
+Let's suppose we have the public key with us, we can just import it:
+</p>
+
+<pre class="example">
+$ gpg2 --import ./public_key
+gpg: /home/me/.gnupg/trustdb.gpg: trustdb created
+gpg: key 6B3D0050CAE0C3C4: public key "Richard Zetterberg &lt;richard.zetterberg@example.com&gt;" imported
+gpg: Total number processed: 1
+gpg:               imported: 1
+</pre>
+
+<p>
+After importing the public key, we can list the public keys, but not the
+secret keys:
+</p>
+
+<pre class="example">
+$ gpg2 --list-public-keys
+/home/me/.gnupg/pubring.kbx
+----------------------------
+pub   rsa4096 2017-09-17 [C] [expires: 2018-09-17]
+      FAB89F7D27C399063F600B036B3D0050CAE0C3C4
+uid           [ unknown] Richard Zetterberg &lt;richard.zetterberg@example.com&gt;
+sub   rsa4096 2017-09-17 [S] [expires: 2018-09-17]
+sub   rsa4096 2017-09-17 [E] [expires: 2018-09-17]
+sub   rsa4096 2017-09-17 [A] [expires: 2018-09-17]
+$ gpg2 --list-secret-keys
+</pre>
+
+<p>
+This is because we need to tell gpg that the secret keys for those public keys
+are stored on our Yubikey:
+</p>
+
+<pre class="example">
+$ gpg2 --card-status
+</pre>
+
+<p>
+We'll see a lot of output of about the Yubikey, and at the end we see the
+keys stored on it:
+</p>
+
+<pre class="example">
+sec#  rsa4096/6B3D0050CAE0C3C4  created: 2017-09-17  expires: 2018-09-17
+ssb&gt;  rsa4096/425E1FD67112482A  created: 2017-09-17  expires: 2018-09-17
+                                card-no: 0006 05578763
+ssb&gt;  rsa4096/5993DBCB1C9AC33B  created: 2017-09-17  expires: 2018-09-17
+                                card-no: 0006 05578763
+ssb&gt;  rsa4096/8DB918AB30C19F1C  created: 2017-09-17  expires: 2018-09-17
+                                card-no: 0006 05578763
+</pre>
+
+<p>
+After doing that we now see the secret keys in the list:
+</p>
+
+<pre class="example">
+$ gpg2 --list-secret-keys
+/home/me/.gnupg/pubring.kbx
+----------------------------
+sec#  rsa4096 2017-09-17 [C] [expires: 2018-09-17]
+      FAB89F7D27C399063F600B036B3D0050CAE0C3C4
+uid           [ unknown] Richard Zetterberg &lt;richard.zetterberg@example.com&gt;
+ssb&gt;  rsa4096 2017-09-17 [S] [expires: 2018-09-17]
+ssb&gt;  rsa4096 2017-09-17 [E] [expires: 2018-09-17]
+ssb&gt;  rsa4096 2017-09-17 [A] [expires: 2018-09-17]
+</pre>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org5cb6286" class="outline-2">
+<h2 id="org5cb6286">Installing and configuring dependencies</h2>
+<div class="outline-text-2" id="text-org5cb6286">
+<p>
+Now that we have created our GPG key and configured our Yubikey it's time to
+configure NixOS to use the Yubikey.
+</p>
+
+<p>
+First, we'll make sure all tools and services are installed and configured. To
+make it easier for ourselves we will create a new file called <code>yubikey-gpg.nix</code>
+and import it in our <code>configuration.nix</code>:
+</p>
+
+<p>
+<b>/etc/nixos/configuration.nix</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">{ config, pkgs, ... }:
+
+{
+  imports = [
+    ./yubikey-gpg.nix
+  ];
+}
+</pre>
+</div>
+</div>
+
+<div id="outline-container-orgc335ee8" class="outline-3">
+<h3 id="orgc335ee8">Yubikey personalization tool</h3>
+<div class="outline-text-3" id="text-orgc335ee8">
+<p>
+The first tool we will install is the <a href="https://developers.yubico.com/yubikey-personalization/">Yubikey Personalization</a> tool. This tool is
+used to communicate with the yubikey to update its configuration:
+</p>
+
+<p>
+<b>/etc/nixos/yubikey-gpg.nix</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">{ config, lib, pkgs, ... }:
+
+{
+  environment.systemPackages = with pkgs; [
+    yubikey-personalization
+  ];
+}
+</pre>
+</div>
+
+<p>
+After running <code>nixos-rebuild switch</code> we will have the command <code>ykpersonalize</code>
+available. After plugging in our Yubikey we can use <code>ykpersonalize -V</code> to check
+the firmware version of it:
+</p>
+
+<pre class="example">
+$ ykpersonalize -V
+USB error: Access denied (insufficient permissions)
+</pre>
+
+<p>
+The reason we are seeing this error is because the device manager <a href="https://en.wikipedia.org/wiki/Udev">udev</a> doesn't
+allow access to USB-devices unless there is a rule for it. The good news is that
+the <code>ykpersonalize</code> program comes packaged with a udev rule file that allows user
+access the device.
+</p>
+
+<p>
+In <code>NixOS</code> there is a simple way of using udev rules packaged with a nixpkg. You
+simply supply <code>services.udev.packages</code> with a list of packages you want to use
+udev rules from:
+</p>
+
+<p>
+<b>/etc/nixos/yubikey-gpg.nix</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">{ config, lib, pkgs, ... }:
+
+{
+  environment.systemPackages = with pkgs; [
+    yubikey-personalization
+  ];
+
+  services.udev.packages = with pkgs; [
+    yubikey-personalization
+  ];
+}
+</pre>
+</div>
+
+<p>
+The nixpkgs added to this list simply needs to populate the directory
+<code>$out/lib/udev/rules.d</code> with udev rule files, and then <a href="https://github.com/NixOS/nixpkgs/blob/release-17.03/nixos/modules/services/hardware/udev.nix#L48">NixOS picks up these files</a>
+and adds them to <code>/etc/udev/rules.d</code> when <code>nixos-rebuild</code> is run.
+We can see that the <a href="https://github.com/NixOS/nixpkgs/blob/release-17.03/pkgs/tools/misc/yubikey-personalization/default.nix#L23">yubikey-personalization</a> nixpkg installs a udev rule
+into this directory.
+</p>
+
+<p>
+After updating <code>yubikey-gpg.nix</code> and running <code>nixos-rebuild switch</code> we need to
+tell udev to reload the rules. We can either do that by rebooting or running the
+following commands:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">sudo -- udevadm control --reload-rules &amp;&amp; udevadm trigger
+</pre>
+</div>
+
+<p>
+Then we can re-run <code>ykpersonalize</code> and we'll get the firmware version of our
+Yubikey:
+</p>
+
+<pre class="example">
+$ ykpersonalize -V
+Firmware version 4.3.4 Touch level 773 Program sequence 1
+1.17.3
+</pre>
+</div>
+</div>
+
+<div id="outline-container-orgeda5c96" class="outline-3">
+<h3 id="orgeda5c96">GnuPG</h3>
+<div class="outline-text-3" id="text-orgeda5c96">
+<p>
+After we know that we can communicate with our Yubikey we'll install GnuPG and
+the needed tools to use the Yubikey as a <a href="https://wiki.gnupg.org/SmartCard">smartcard</a>. Besides installing GnuPG we
+need to enable <code>pcscd</code>, which is a daemon that exposes a generic API that allows
+programs to communicate with smartcards without knowing the specifics about the
+device.
+</p>
+
+<p>
+<b>/etc/nixos/yubikey-gpg.nix</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">{ config, lib, pkgs, ... }:
+
+{
+  services.pcscd.enable = true;
+
+  environment.systemPackages = with pkgs; [
+    gnupg
+    yubikey-personalization
+  ];
+
+  services.udev.packages = with pkgs; [
+    yubikey-personalization
+  ];
+}
+</pre>
+</div>
+
+<p>
+After running <code>nixos-rebuild switch</code> we now have everything to use GnuPG and
+Yubikey together.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org746ce37" class="outline-3">
+<h3 id="org746ce37">GPG/SSH Agent</h3>
+<div class="outline-text-3" id="text-org746ce37">
+<p>
+The last step is to setup <code>gpg-agent</code> instead of <code>ssh-agent</code>. Basically
+<code>gpg-agent</code> emulates <code>ssh-agent</code> but lets you use normal SSH keys <i>and</i>
+GPG keys.
+</p>
+
+
+<div class="figure">
+<p><img src="assets/yubikey-gpg-nixos/key-usage.png" alt="key-usage.png">
+</p>
+</div>
+
+<p>
+So <code>ssh-add ~/.ssh/id.rsa</code> will work like before, so you don't
+need to change your workflow if you just want to try out using GnuPG for
+SSH authentication.
+</p>
+
+<p>
+<b>/etc/nixos/yubikey-gpg.nix</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">{ config, lib, pkgs, ... }:
+
+{
+  programs.ssh.startAgent = false;
+
+  services.pcscd.enable = true;
+
+  environment.systemPackages = with pkgs; [
+    gnupg
+    yubikey-personalization
+  ];
+
+  environment.shellInit = ''
+    gpg-connect-agent /bye
+    export SSH_AUTH_SOCK=$(gpgconf --list-dirs agent-ssh-socket)
+  '';
+
+  services.udev.packages = with pkgs; [
+    yubikey-personalization
+  ];
+}
+</pre>
+</div>
+
+<p>
+Now after we run <code>nixos-rebuild switch</code> we'll have to manually kill <code>ssh-agent</code>,
+then log in and out. After that we check that <code>gpg-agent</code> is running and not
+<code>ssh-agent</code>:
+</p>
+
+<pre class="example">
+$ ps aux | grep ssh-agent
+
+$ ps aux | grep gpg-agent
+ps aux | grep gpg-agent
+me       1505  0.0  0.0 348084  3160 ?        Ss   07:12   0:03 gpg-agent --homedir /home/me/.gnupg --use-standard-socket --daemon
+</pre>
+
+<p>
+We can use <code>ssh-add</code> like we did before, and we'll see the cached keys
+along with our Yubikey card:
+</p>
+
+<pre class="example">
+$ ssh-add -L
+ssh-rsa [truncated for readability] /home/me/.ssh/id.rsa
+ssh-rsa [truncated for readability] cardno:0000239725
+</pre>
+
+<p>
+Now we only need to export export our public key and put it on the server:
+</p>
+
+<pre class="example">
+$ gpg2 --export-ssh-key richard.zetterberg@example.com &gt; ~/.ssh/yubikey.pub
+</pre>
+
+<p>
+Then you just need to change your SSH config to use that public key and GPG
+will handle everything else for you:
+</p>
+
+<pre class="example">
+Host myserver
+    Hostname 8.8.8.8
+    User admin
+    IdentityFile ~/.ssh/yubikey.pub
+</pre>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>
