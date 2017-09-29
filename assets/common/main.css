@@ -20,6 +20,7 @@ img {
 }
 
 #content {
+  max-width: 100%;
   width: 970px;
   margin: 0 auto;
   padding: 0 20px 5px 20px;

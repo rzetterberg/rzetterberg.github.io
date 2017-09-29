@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 2017-09-29 Fri 16:14 -->
+<!-- 2017-09-29 Fri 16:25 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Using Jenkins to build private GitHub repos inside Docker</title>
@@ -50,15 +50,9 @@ privileges. When writing this article <b>Docker</b> was version <code>1.30.0</co
 <b>Jenkins</b> <code>2.42</code>.
 </p>
 
-<<<<<<< HEAD
 <div id="outline-container-org6a37a93" class="outline-2">
 <h2 id="org6a37a93">Installing dependencies</h2>
 <div class="outline-text-2" id="text-org6a37a93">
-=======
-<div id="outline-container-org776bc35" class="outline-2">
-<h2 id="org776bc35">Installing dependencies</h2>
-<div class="outline-text-2" id="text-org776bc35">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 First off, we need to install some packages used by apt to retrieve packages
 over HTTPS:
@@ -131,15 +125,9 @@ Then we should make sure the Jenkins and Docker services are running:
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-org1e0e15c" class="outline-2">
 <h2 id="org1e0e15c">Configuring Jenkins</h2>
 <div class="outline-text-2" id="text-org1e0e15c">
-=======
-<div id="outline-container-orgbe925b1" class="outline-2">
-<h2 id="orgbe925b1">Configuring Jenkins</h2>
-<div class="outline-text-2" id="text-orgbe925b1">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 Now that Jenkins and Docker is installed it's time to configure Jenkins.
 </p>
@@ -233,15 +221,9 @@ We are now ready to create our first project.
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-org2c29bb8" class="outline-2">
 <h2 id="org2c29bb8">Creating our first Jenkins project</h2>
 <div class="outline-text-2" id="text-org2c29bb8">
-=======
-<div id="outline-container-orga001928" class="outline-2">
-<h2 id="orga001928">Creating our first Jenkins project</h2>
-<div class="outline-text-2" id="text-orga001928">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 We start off by pressing <b>New item</b> in the main menu to the left, then select
 <b>Freestyle project</b> and enter the name of our project:
@@ -286,15 +268,9 @@ know of:
 </ul>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-org0bf18fd" class="outline-3">
 <h3 id="org0bf18fd">Cloning over HTTPS</h3>
 <div class="outline-text-3" id="text-org0bf18fd">
-=======
-<div id="outline-container-orgf2b58a1" class="outline-3">
-<h3 id="orgf2b58a1">Cloning over HTTPS</h3>
-<div class="outline-text-3" id="text-orgf2b58a1">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 This article will use personal access token, because anyone using GitHub
 already knows how to access repositories over SSH.
@@ -387,15 +363,9 @@ This is useful if we want to run build commands manually to debug failing builds
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-org9f42bb2" class="outline-3">
 <h3 id="org9f42bb2">Building the Docker image</h3>
 <div class="outline-text-3" id="text-org9f42bb2">
-=======
-<div id="outline-container-org5c538be" class="outline-3">
-<h3 id="org5c538be">Building the Docker image</h3>
-<div class="outline-text-3" id="text-org5c538be">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 To define how a project is built in Jenkins you create <b>Build steps</b> that are
 performed sequentially. There are different types of <b>build steps</b>, in this
@@ -434,15 +404,9 @@ We then add the Docker <code>build</code> command to that step:
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-orgb54044c" class="outline-3">
 <h3 id="orgb54044c">Building inside the Docker container</h3>
 <div class="outline-text-3" id="text-orgb54044c">
-=======
-<div id="outline-container-org3a80d38" class="outline-3">
-<h3 id="org3a80d38">Building inside the Docker container</h3>
-<div class="outline-text-3" id="text-org3a80d38">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 Our next task is to create a Jenkins build step that runs our projects build
 command inside a Docker-container from our built Docker-image.
@@ -488,15 +452,9 @@ We then click <b>Save</b>
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-orgca082ef" class="outline-2">
 <h2 id="orgca082ef">Running our first build</h2>
 <div class="outline-text-2" id="text-orgca082ef">
-=======
-<div id="outline-container-orge43299d" class="outline-2">
-<h2 id="orge43299d">Running our first build</h2>
-<div class="outline-text-2" id="text-orge43299d">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 Our final task is just to start a build of our Jenkins project. Simply click
 <b>Build now</b> in the project. Under <b>Build history</b> you will see the build

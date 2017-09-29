@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 2017-09-29 Fri 16:14 -->
+<!-- 2017-09-29 Fri 16:25 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Teensy development on NixOS</title>
@@ -58,15 +58,9 @@ For this article to make most sense you should be familiar with using NixOS,
 GNU Make and GCC.
 </p>
 
-<<<<<<< HEAD
 <div id="outline-container-org1fda55a" class="outline-2">
 <h2 id="org1fda55a">Dependencies</h2>
 <div class="outline-text-2" id="text-org1fda55a">
-=======
-<div id="outline-container-org554692b" class="outline-2">
-<h2 id="org554692b">Dependencies</h2>
-<div class="outline-text-2" id="text-org554692b">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 I wanted to setup a project where I could write code for the device itself, but
 also unit tests that ran on my host.
@@ -155,15 +149,9 @@ Arduino IDE.
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-orgde8f1e3" class="outline-2">
 <h2 id="orgde8f1e3">Teensy core library build</h2>
 <div class="outline-text-2" id="text-orgde8f1e3">
-=======
-<div id="outline-container-org4912f3d" class="outline-2">
-<h2 id="org4912f3d">Teensy core library build</h2>
-<div class="outline-text-2" id="text-org4912f3d">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 First off, to make a device Arduino compatible you need to create an Arduino
 core library implementation.
@@ -255,15 +243,9 @@ using the flag <code>-T[short name].ld</code>, so I used the flag: <code>-Tmk20d
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-org46ac53b" class="outline-2">
 <h2 id="org46ac53b">Teensy core library derivation</h2>
 <div class="outline-text-2" id="text-org46ac53b">
-=======
-<div id="outline-container-org66d950b" class="outline-2">
-<h2 id="org66d950b">Teensy core library derivation</h2>
-<div class="outline-text-2" id="text-org66d950b">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 The <code>Makefile</code> above produces object files for all <i>C and C++</i> files it finds
 in the current directory.
@@ -433,15 +415,9 @@ in
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-org96eaec5" class="outline-2">
 <h2 id="org96eaec5">Using the Teensy core library</h2>
 <div class="outline-text-2" id="text-org96eaec5">
-=======
-<div id="outline-container-orgda59ac8" class="outline-2">
-<h2 id="orgda59ac8">Using the Teensy core library</h2>
-<div class="outline-text-2" id="text-orgda59ac8">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 I could then update my <code>default.nix</code> definition to include the teensy3
 core library as a dependency with the right values for my board:
@@ -493,15 +469,9 @@ $ nix-shell
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-orgc5a499d" class="outline-2">
 <h2 id="orgc5a499d">Compiling the project</h2>
 <div class="outline-text-2" id="text-orgc5a499d">
-=======
-<div id="outline-container-org0491771" class="outline-2">
-<h2 id="org0491771">Compiling the project</h2>
-<div class="outline-text-2" id="text-org0491771">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 To actually build the project I created a <code>Makefile</code> that included the <code>flags.mk</code>
 file from <code>teensy3-core</code>, to avoid having to type all the flags again:

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 2017-09-29 Fri 16:14 -->
+<!-- 2017-09-29 Fri 16:25 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Setting up Kubernetes on NixOS</title>
@@ -74,15 +74,9 @@ on multiple machines on your local network.
 </p>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-org0b7b3fd" class="outline-2">
 <h2 id="org0b7b3fd">Installation</h2>
 <div class="outline-text-2" id="text-org0b7b3fd">
-=======
-<div id="outline-container-orgaa08fb8" class="outline-2">
-<h2 id="orgaa08fb8">Installation</h2>
-<div class="outline-text-2" id="text-orgaa08fb8">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 First of all, there isn't a single <code>master</code> and <code>node</code> systemd service. There
 are a few separate systemd services that together make up the functionality of
@@ -136,15 +130,9 @@ Virtualbox VM that <code>minikube</code> created, instead of <code>127.0.0.1</co
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-org6fb0411" class="outline-2">
 <h2 id="org6fb0411">Starting a deployment</h2>
 <div class="outline-text-2" id="text-org6fb0411">
-=======
-<div id="outline-container-org0453b61" class="outline-2">
-<h2 id="org0453b61">Starting a deployment</h2>
-<div class="outline-text-2" id="text-org0453b61">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 The first thing we will do is run a single <code>nginx</code> deployment run on 2
 containers on the cluster.
@@ -228,15 +216,9 @@ nginx-deployment   2         2         2            2           10s
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-org22959bf" class="outline-2">
 <h2 id="org22959bf">Show information</h2>
 <div class="outline-text-2" id="text-org22959bf">
-=======
-<div id="outline-container-org4c7fb21" class="outline-2">
-<h2 id="org4c7fb21">Show information</h2>
-<div class="outline-text-2" id="text-org4c7fb21">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 We can show the details of this deployment by running:
 </p>
@@ -392,15 +374,9 @@ Lo and behold, a new container was started automatically!
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-orgb352a5a" class="outline-2">
 <h2 id="orgb352a5a">Accessing nginx</h2>
 <div class="outline-text-2" id="text-orgb352a5a">
-=======
-<div id="outline-container-org6093cf9" class="outline-2">
-<h2 id="org6093cf9">Accessing nginx</h2>
-<div class="outline-text-2" id="text-org6093cf9">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 Next step is to access nginx to make sure it is running and working as expected.
 A newly started nginx should show you the default start page for all requests.
@@ -459,15 +435,9 @@ It works!
 </div>
 </div>
 
-<<<<<<< HEAD
 <div id="outline-container-orgb303054" class="outline-2">
 <h2 id="orgb303054">Changing a deployment</h2>
 <div class="outline-text-2" id="text-orgb303054">
-=======
-<div id="outline-container-orgf2445f3" class="outline-2">
-<h2 id="orgf2445f3">Changing a deployment</h2>
-<div class="outline-text-2" id="text-orgf2445f3">
->>>>>>> 225dfb2163755e8a55644bedd7004414f2f20ad7
 <p>
 Let's change our deployment to have 3 containers that runs nginx so that we can
 load balance connections between those 3 containers. We change the value
