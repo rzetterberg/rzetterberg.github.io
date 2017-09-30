@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 2017-09-29 Fri 16:11 -->
+<!-- 2017-09-30 Sat 13:16 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Setting up GnuPG + Yubikey on NixOS for SSH authentication</title>
@@ -574,7 +574,7 @@ $ gpg2 --armor --export richard.zetterberg@example.com &gt; public_key
 
 <p>
 To simulate that we want to start using our Yubikey on a new computer we
-remote the <code>.gnupg</code> directory:
+remove the <code>.gnupg</code> directory:
 </p>
 
 <pre class="example">
@@ -917,7 +917,7 @@ ssh-rsa [truncated for readability] cardno:0000239725
 </pre>
 
 <p>
-Now we only need to export export our public key and put it on the server:
+Now we only need to export our public key and put it on the server:
 </p>
 
 <pre class="example">
