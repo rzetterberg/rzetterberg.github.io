@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- 2017-10-01 Sun 10:19 -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sending Nginx logs to ELK</title>
+<meta name="generator" content="Org mode">
+<link rel="stylesheet" type="text/css" href="assets/common/htmlize.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/theme.css"/>
+<link rel="stylesheet" type="text/css" href="assets/common/main.css"/>
+</head>
+<body>
+<div id="org-div-home-and-up">
+ <a accesskey="h" href="../"> UP </a>
+ |
+ <a accesskey="H" href="/"> HOME </a>
+</div><div id="content">
+<div class="rz-header">
+  <img class="rz-logotype" src="assets/common/logotype.svg" />
+</div>
+<div class="rz-menu">
+  <ul>
+    <li><a href="index.html">To article list</a></li>
+    <li class="right"><a href="my-identities.html">My identities</a></li>
+  </ul>
+</div>
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-98746269-1', 'auto');
+  ga('send', 'pageview');
+</script>
+<dl class="org-dl">
+<dt>Published</dt><dd>2017-10-01</dd>
+</dl>
+
+<p>
+In this article we will setup <code>Nginx</code> to send it's <i>access</i> and <i>error</i> logs
+using the <a href="https://en.wikipedia.org/wiki/Syslog">syslog</a> standard to <code>Logstash</code>, that stores the logs in <code>ElasticSearch</code>.
+</p>
+
+<p>
+The reason why we would want to do this is because:
+</p>
+
+<ul class="org-ul">
+<li>It's easy to setup</li>
+<li>Nginx has builtin support for this</li>
+<li>You don't need to configure and run a separate program for log collection</li>
+</ul>
+
+<p>
+We will do this in a step by step manner using <code>Docker</code> and <code>docker-compose</code>
+locally. And don't worry, you don't need to copy all the files manually,
+there's a gzipped tar file you can <a href="code/nginx-elk-logging.tar.gz">download here</a> (<a href="./code/nginx-elk-logging.tar.gz.gpg">signature</a>) that contains the fully working
+project.
+</p>
+
+<div id="outline-container-org3512232" class="outline-2">
+<h2 id="org3512232">Project structure</h2>
+<div class="outline-text-2" id="text-org3512232">
+<p>
+We will setup 3 services using <code>docker-compose</code>:
+</p>
+
+<ul class="org-ul">
+<li><code>Nginx</code></li>
+<li><code>Logstash</code></li>
+<li><code>Elasticsearch</code></li>
+</ul>
+
+<p>
+We will base our Docker containers on the official Docker images for each
+project. We will use the alpine based images when available to save space.
+</p>
+
+<p>
+Let's start by creating an empty project directory, and then create our
+<b>docker-compose.yaml</b> file in the root of the project:
+</p>
+
+<p>
+<b>docker-compose.yaml</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-yaml"><span style="color: #599cab;">version</span>: <span style="color: #2aa889;">'3'</span>
+
+<span style="color: #599cab;">services</span>:
+  <span style="color: #599cab;">nginx</span>:
+    <span style="color: #599cab;">build</span>: ./nginx
+    <span style="color: #599cab;">depends_on</span>:
+      - logstash
+    <span style="color: #599cab;">ports</span>:
+      - 8080:8080
+  <span style="color: #599cab;">logstash</span>:
+    <span style="color: #599cab;">build</span>: ./logstash
+    <span style="color: #599cab;">depends_on</span>:
+      - elasticsearch
+  <span style="color: #599cab;">elasticsearch</span>:
+    <span style="color: #599cab;">image</span>: elasticsearch:5.5-alpine
+    <span style="color: #599cab;">environment</span>:
+      - cluster.name=docker-cluster
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+      - <span style="color: #2aa889;">"ES_JAVA_OPTS=-Xms2g -Xmx2g"</span>
+    <span style="color: #599cab;">ulimits</span>:
+      <span style="color: #599cab;">memlock</span>:
+        <span style="color: #599cab;">soft</span>: -1
+        <span style="color: #599cab;">hard</span>: -1
+    <span style="color: #599cab;">ports</span>:
+      - 9200:9200
+</pre>
+</div>
+
+<p>
+Since we will not change the image for <code>ElasticSearch</code> we'll just use the
+official image as is.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org5c08a02" class="outline-2">
+<h2 id="org5c08a02">Setting up Nginx</h2>
+<div class="outline-text-2" id="text-org5c08a02">
+<p>
+Let's setup <code>nginx</code> by first creating the <code>./nginx</code> directory and then start to
+work on the nginx config file.
+</p>
+
+<p>
+We'll use a very simple setup where we just serve static files from the
+directory <code>/nginx/data</code> and then send the access and error logs to Logstash. To
+be able to find the <code>Logstash</code> container we use Dockers builtin resolver, so we
+can use the service name we used in <code>docker-compose.yaml</code>.
+</p>
+
+<p>
+<b>nginx/conf/nginx.conf</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-conf"><span style="color: #245361;"># </span><span style="color: #245361;">Needed to run nginx in Docker</span>
+daemon off;
+
+pid /nginx/nginx.pid;
+
+<span style="color: #d26937;">events</span> {
+  worker_connections 1024;
+}
+
+<span style="color: #d26937;">http</span> {
+  <span style="color: #245361;"># </span><span style="color: #245361;">Use Dockers builtin resolver to find the other Docker based services</span>
+  <span style="color: #599cab;">resolver 127.0.0.11 ipv6</span>=off;
+
+  include /etc/nginx/mime.types;
+
+  <span style="color: #245361;"># </span><span style="color: #245361;">Custom log format that also includes the host that processed the request</span>
+  log_format logstash <span style="color: #2aa889;">'$remote_addr - $remote_user [$time_local] "$host" '</span>
+                      <span style="color: #2aa889;">'"$request" $status $body_bytes_sent '</span>
+                      <span style="color: #2aa889;">'"$http_referer" "$http_user_agent"'</span>;
+
+  <span style="color: #245361;"># </span><span style="color: #245361;">Send logs to Logstash</span>
+  <span style="color: #599cab;">access_log syslog:server</span>=logstash:5140,tag=nginx_access logstash;
+  <span style="color: #599cab;">error_log syslog:server</span>=logstash:5140,tag=nginx_error notice;
+
+  <span style="color: #245361;"># </span><span style="color: #245361;">Serve all static content inside the /nginx/data directory</span>
+  <span style="color: #d26937;">server</span> {
+    listen 8080;
+    root /nginx/data;
+
+    <span style="color: #d26937;">location /</span> {
+    }
+  }
+}
+</pre>
+</div>
+
+<p>
+We're using a custom log format to include the host so that we can have many
+<code>nginx</code> instances running and logging to the same <code>Logstash</code> instance.
+</p>
+
+<p>
+Also we are tagging the logs so that <code>Logstash</code> will be able to parse the logs
+correctly depending on whether it's an <i>access</i> or <i>error</i> log being sent.
+</p>
+
+<p>
+Then we'll just create some static HTML content that will be put in the
+<code>nginx</code> container:
+</p>
+
+<p>
+<b>nginx/data/index.html</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-web">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+  &lt;head&gt;
+    &lt;meta charset="utf-8"&gt;
+    &lt;meta name="viewport" content="width=device-width"&gt;
+    &lt;title&gt;Nginx test&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    Hello, we're just testing nginx logging.
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre>
+</div>
+
+<p>
+Now we are ready to create our <code>Dockerfile</code> for the <code>nginx</code> container:
+</p>
+
+<p>
+<b>nginx/Dockerfile</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-dockerfile"><span style="color: #195466; font-weight: bold;">FROM</span> nginx:stable-alpine
+
+<span style="color: #195466; font-weight: bold;">WORKDIR</span> /nginx
+
+<span style="color: #195466; font-weight: bold;">RUN</span> chown nginx:nginx /nginx
+
+<span style="color: #195466; font-weight: bold;">USER</span> nginx
+
+<span style="color: #195466; font-weight: bold;">COPY</span> ./data /nginx/data
+<span style="color: #195466; font-weight: bold;">COPY</span> ./conf /nginx/conf
+
+<span style="color: #195466; font-weight: bold;">CMD</span> [<span style="color: #2aa889;">"nginx"</span>, <span style="color: #2aa889;">"-c"</span>, <span style="color: #2aa889;">"/nginx/conf/nginx.conf"</span>]
+</pre>
+</div>
+
+<p>
+After doing this, our project should have the following structure:
+</p>
+
+<pre class="example">
+$ tree
+.
+├── docker-compose.yaml
+└── nginx
+    ├── conf
+    │   └── nginx.conf
+    ├── data
+    │   └── index.html
+    ├── Dockerfile
+    └── nginx.conf
+
+3 directories, 5 files
+</pre>
+</div>
+</div>
+
+<div id="outline-container-orgcd10fc8" class="outline-2">
+<h2 id="orgcd10fc8">Setting up Logstash</h2>
+<div class="outline-text-2" id="text-orgcd10fc8">
+<p>
+Next we'll setup <code>Logstash</code> by first creating the <code>./logstash</code> directory and
+then start to work on the <code>Logstash</code> configuration file.
+</p>
+
+<p>
+We'll setup <code>Logstash</code> to use:
+</p>
+
+<ul class="org-ul">
+<li><b>1 input</b> for <code>syslog</code></li>
+<li><b>2 filters</b> to process <i>access</i> and <i>error</i> logs</li>
+<li><b>1 output</b> to store the processed logs in <code>ElasticSearch</code></li>
+</ul>
+
+
+<div class="figure">
+<p><img src="assets/nginx-elk-logging/logstash-overview.png" alt="logstash-overview.png">
+</p>
+</div>
+
+<p>
+We will use the <code>Logstash</code> <a href="https://www.elastic.co/guide/en/logstash/current/plugins-filters-grok.html">Grok filter plugin</a> to process the incoming <code>nginx</code>
+logs. Grok is a plugin where you write <code>patterns</code> that extract values from
+raw data. These patterns are written in a matching language where you define
+a simplified regular expression and give it a name.
+</p>
+
+<p>
+For example, let's say we want to validate and extract the HTTP method from a
+string, then we'd write the following grok pattern:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-fundamental">METHOD (OPTIONS|GET|HEAD|POST|PUT|DELETE|TRACE|CONNECT)
+</pre>
+</div>
+
+<p>
+You can then combine these named regular expressions to parse more complex
+strings. Suppose we want to parse the first line of a HTTP request, that
+could look like this:
+</p>
+
+<ul class="org-ul">
+<li><code>GET /db HTTP/1.1</code></li>
+<li><code>POST /user/login HTTP/1.1</code></li>
+</ul>
+
+<p>
+Then we'd define a grok pattern that we write as the text file
+<code>/etc/logstash/patterns/request_start</code> with the following content:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-fundamental">METHOD (OPTIONS|GET|HEAD|POST|PUT|DELETE|TRACE|CONNECT)
+REQUEST_START %{METHOD:method} %{DATA:path} HTTP/%{DATA:http_version}
+</pre>
+</div>
+
+<p>
+To use this pattern we simply add a <code>grok</code> configuration to the <code>filter</code>
+part of the <code>Logstash</code> config file:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-conf"><span style="color: #d26937;">filter</span> {
+    <span style="color: #d26937;">grok</span> {
+      <span style="color: #599cab;">patterns_dir</span> =&gt; <span style="color: #2aa889;">"/etc/logstash/patterns"</span>
+      <span style="color: #599cab;">match</span> =&gt; { <span style="color: #2aa889;">"message"</span> =&gt; <span style="color: #2aa889;">"%{REQUEST_START}"</span> }
+    }
+}
+</pre>
+</div>
+
+<p>
+We have now told <code>Logstash</code> to match the raw message against our pattern and
+extract 3 parts of the message. Processing our examples above we'd get the
+following results:
+</p>
+
+<p>
+<code>GET /db HTTP/1.1</code>
+</p>
+<div class="org-src-container">
+<pre class="src src-javascript">{
+  method: <span style="color: #2aa889;">"GET"</span>,
+  path: <span style="color: #2aa889;">"/db"</span>,
+  http_version: <span style="color: #2aa889;">"1.1"</span>
+}
+</pre>
+</div>
+
+<p>
+<code>POST /user/login HTTP/1.1</code>
+</p>
+<div class="org-src-container">
+<pre class="src src-javascript">{
+  method: <span style="color: #2aa889;">"POST"</span>,
+  path: <span style="color: #2aa889;">"/user/login"</span>,
+  http_version: <span style="color: #2aa889;">"1.1"</span>
+}
+</pre>
+</div>
+
+<p>
+Here's how our grok patterns look for nginx <i>access</i> and <i>error</i> logs:
+</p>
+
+<p>
+<b>logstash/conf/patterns/nginx_access</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">METHOD (OPTIONS|GET|HEAD|POST|PUT|DELETE|TRACE|CONNECT)
+NGINX_ACCESS %{IPORHOST:visitor_ip} - %{USERNAME:remote_user} \[%{HTTPDATE:time_local}\] <span style="color: #2aa889;">"%{DATA:server_name}"</span> <span style="color: #2aa889;">"%{METHOD:method} %{URIPATHPARAM:path} HTTP/%{NUMBER:http_version}"</span> %{INT:status} %{INT:body_bytes_sent} <span style="color: #2aa889;">"%{URI:referer}"</span> %{QS:user_agent}
+</pre>
+</div>
+
+<p>
+<b>logstash/conf/patterns/nginx_error</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">ERRORDATE %{YEAR}/%{MONTHNUM}/%{MONTHDAY} %{TIME}
+NGINX_ERROR %{ERRORDATE:time_local} \[%{LOGLEVEL:level}\] %{INT:process_id}#%{INT:thread_id}: \*(%{INT:connection_id})? %{GREEDYDATA:description}
+</pre>
+</div>
+
+<p>
+And here's how we configure <code>Logstash</code> to setup <code>syslog</code> input, our grok
+patterns and <code>ElasticSearch</code> output:
+</p>
+
+<p>
+<b>logstash/conf/logstash.conf</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-conf"><span style="color: #d26937;">input</span> {
+  <span style="color: #d26937;">syslog</span> {
+    <span style="color: #599cab;">host</span> =&gt; <span style="color: #2aa889;">"logstash"</span>
+    <span style="color: #599cab;">port</span> =&gt; 5140
+  }
+}
+
+<span style="color: #d26937;">filter</span> {
+  <span style="color: #599cab;">if </span>[<span style="color: #33859e; font-weight: bold;">program</span>] == <span style="color: #2aa889;">"nginx_access"</span> {
+    <span style="color: #d26937;">grok</span> {
+      <span style="color: #599cab;">patterns_dir</span> =&gt; <span style="color: #2aa889;">"/etc/logstash/patterns"</span>
+      <span style="color: #599cab;">match</span> =&gt; { <span style="color: #2aa889;">"message"</span> =&gt; <span style="color: #2aa889;">"%{NGINX_ACCESS}"</span> }
+      <span style="color: #599cab;">remove_tag</span> =&gt; [<span style="color: #2aa889;">"nginx_access"</span>, <span style="color: #2aa889;">"_grokparsefailure"</span>]
+      <span style="color: #599cab;">add_field</span> =&gt; {
+        <span style="color: #2aa889;">"type"</span> =&gt; <span style="color: #2aa889;">"nginx_access"</span>
+      }
+      <span style="color: #599cab;">remove_field</span> =&gt; [<span style="color: #2aa889;">"program"</span>]
+    }
+
+    <span style="color: #d26937;">date</span> {
+      <span style="color: #599cab;">match</span> =&gt; [<span style="color: #2aa889;">"time_local"</span>, <span style="color: #2aa889;">"dd/MMM/YYYY:HH:mm:ss Z"</span>]
+      <span style="color: #599cab;">target</span> =&gt; <span style="color: #2aa889;">"@timestamp"</span>
+      <span style="color: #599cab;">remove_field</span> =&gt; <span style="color: #2aa889;">"time_local"</span>
+    }
+
+    <span style="color: #d26937;">useragent</span> {
+      <span style="color: #599cab;">source</span> =&gt; <span style="color: #2aa889;">"user_agent"</span>
+      <span style="color: #599cab;">target</span> =&gt; <span style="color: #2aa889;">"useragent"</span>
+      <span style="color: #599cab;">remove_field</span> =&gt; <span style="color: #2aa889;">"user_agent"</span>
+    }
+  }
+
+  <span style="color: #599cab;">if </span>[<span style="color: #33859e; font-weight: bold;">program</span>] == <span style="color: #2aa889;">"nginx_error"</span> {
+    <span style="color: #d26937;">grok</span> {
+      <span style="color: #599cab;">patterns_dir</span> =&gt; <span style="color: #2aa889;">"/etc/logstash/patterns"</span>
+      <span style="color: #599cab;">match</span> =&gt; { <span style="color: #2aa889;">"message"</span> =&gt; <span style="color: #2aa889;">"%{NGINX_ERROR}"</span> }
+      <span style="color: #599cab;">remove_tag</span> =&gt; [<span style="color: #2aa889;">"nginx_error"</span>, <span style="color: #2aa889;">"_grokparsefailure"</span>]
+      <span style="color: #599cab;">add_field</span> =&gt; {
+        <span style="color: #2aa889;">"type"</span> =&gt; <span style="color: #2aa889;">"nginx_error"</span>
+      }
+      <span style="color: #599cab;">remove_field</span> =&gt; [<span style="color: #2aa889;">"program"</span>]
+    }
+
+    <span style="color: #d26937;">date</span> {
+      <span style="color: #599cab;">match</span> =&gt; [<span style="color: #2aa889;">"time_local"</span>, <span style="color: #2aa889;">"YYYY/MM/dd HH:mm:ss"</span>]
+      <span style="color: #599cab;">target</span> =&gt; <span style="color: #2aa889;">"@timestamp"</span>
+      <span style="color: #599cab;">remove_field</span> =&gt; <span style="color: #2aa889;">"time_local"</span>
+    }
+  }
+}
+
+<span style="color: #d26937;">output</span> {
+  <span style="color: #d26937;">elasticsearch</span> {
+    <span style="color: #599cab;">hosts</span> =&gt; [<span style="color: #2aa889;">"http://elasticsearch:9200"</span>]
+    <span style="color: #599cab;">manage_template</span> =&gt; true
+    <span style="color: #599cab;">template_overwrite</span> =&gt; true
+    <span style="color: #599cab;">template</span> =&gt; <span style="color: #2aa889;">"/etc/logstash/es_template.json"</span>
+    <span style="color: #599cab;">index</span> =&gt; <span style="color: #2aa889;">"logstash-%{+YYYY.MM.dd}"</span>
+  }
+}
+</pre>
+</div>
+
+<p>
+The parameter <code>program</code> that we base our if-cases on is the <code>tag</code> value that we
+configured <code>nginx</code> to add to the different types of logs:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-conf">  <span style="color: #245361;"># </span><span style="color: #245361;">Send logs to Logstash</span>
+  <span style="color: #599cab;">access_log syslog:server</span>=logstash:5140,tag=nginx_access logstash;
+  <span style="color: #599cab;">error_log syslog:server</span>=logstash:5140,tag=nginx_error notice;
+</pre>
+</div>
+
+<p>
+The only thing left before we create the Dockerfile is to create the
+<code>ElasticSearch</code> template to use. This template tells <code>ElasticSearch</code> what fields
+our different types of log items will have. If you look closely at this
+template, you'll notice that all the defined fields exists in the grok filter
+definition.
+</p>
+
+<p>
+<b>logstash/conf/es_template.json</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-conf">{
+  <span style="color: #2aa889;">"version"</span> : 50001,
+  <span style="color: #2aa889;">"template"</span> : <span style="color: #2aa889;">"logstash-*"</span>,
+  <span style="color: #2aa889;">"settings"</span> : {
+    <span style="color: #2aa889;">"index"</span> : {
+      <span style="color: #2aa889;">"refresh_interval"</span> : <span style="color: #2aa889;">"5s"</span>
+    }
+  },
+  <span style="color: #2aa889;">"mappings"</span> : {
+    <span style="color: #2aa889;">"nginx_access"</span> : {
+      <span style="color: #2aa889;">"_all"</span> : {
+        <span style="color: #2aa889;">"enabled"</span> : false,
+        <span style="color: #2aa889;">"norms"</span> : false
+      },
+      <span style="color: #2aa889;">"properties"</span> : {
+        <span style="color: #2aa889;">"@timestamp"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"date"</span>
+        },
+        <span style="color: #2aa889;">"body_bytes_sent"</span>: {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"integer"</span>
+        },
+        <span style="color: #2aa889;">"message"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"text"</span>
+        },
+        <span style="color: #2aa889;">"host"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+        },
+        <span style="color: #2aa889;">"server_name"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+        },
+        <span style="color: #2aa889;">"referer"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+        },
+        <span style="color: #2aa889;">"remote_user"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+        },
+        <span style="color: #2aa889;">"method"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+        },
+        <span style="color: #2aa889;">"path"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+        },
+        <span style="color: #2aa889;">"http_version"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+        },
+        <span style="color: #2aa889;">"status"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"short"</span>
+        },
+        <span style="color: #2aa889;">"tags"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+        },
+        <span style="color: #2aa889;">"useragent"</span> : {
+          <span style="color: #2aa889;">"dynamic"</span> : true,
+          <span style="color: #2aa889;">"properties"</span> : {
+            <span style="color: #2aa889;">"device"</span> : {
+              <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+            },
+            <span style="color: #2aa889;">"major"</span> : {
+              <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"short"</span>
+            },
+            <span style="color: #2aa889;">"minor"</span> : {
+              <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"short"</span>
+            },
+            <span style="color: #2aa889;">"os"</span> : {
+              <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+            },
+            <span style="color: #2aa889;">"os_name"</span> : {
+              <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+            },
+            <span style="color: #2aa889;">"patch"</span> : {
+              <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"short"</span>
+            }
+          }
+        },
+        <span style="color: #2aa889;">"visitor_ip"</span> : {
+          <span style="color: #2aa889;">"type"</span>: <span style="color: #2aa889;">"ip"</span>
+        }
+      }
+    },
+    <span style="color: #2aa889;">"nginx_error"</span> : {
+      <span style="color: #2aa889;">"_all"</span> : {
+        <span style="color: #2aa889;">"enabled"</span> : false,
+        <span style="color: #2aa889;">"norms"</span> : false
+      },
+      <span style="color: #2aa889;">"properties"</span> : {
+        <span style="color: #2aa889;">"@timestamp"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"date"</span>
+        },
+        <span style="color: #2aa889;">"level"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"keyword"</span>
+        },
+        <span style="color: #2aa889;">"process_id"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"integer"</span>
+        },
+        <span style="color: #2aa889;">"thread_id"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"integer"</span>
+        },
+        <span style="color: #2aa889;">"connection_id"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"integer"</span>
+        },
+        <span style="color: #2aa889;">"message"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"text"</span>
+        },
+        <span style="color: #2aa889;">"content"</span> : {
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"text"</span>
+        }
+      }
+    }
+  },
+  <span style="color: #2aa889;">"aliases"</span> : {}
+}
+</pre>
+</div>
+
+<p>
+Now that we have all of our configurations for <code>Logstash</code> setup, we can create
+the Dockerfile:
+</p>
+
+<p>
+<b>logstash/Dockerfile</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-dockerfile"><span style="color: #195466; font-weight: bold;">FROM</span> logstash:5.5-alpine
+
+<span style="color: #195466; font-weight: bold;">ENV</span> PLUGIN_BIN <span style="color: #2aa889;">"/usr/share/logstash/bin/logstash-plugin"</span>
+
+<span style="color: #195466; font-weight: bold;">RUN</span> <span style="color: #2aa889;">"$PLUGIN_BIN"</span> install logstash-input-syslog
+<span style="color: #195466; font-weight: bold;">RUN</span> <span style="color: #2aa889;">"$PLUGIN_BIN"</span> install logstash-filter-date
+<span style="color: #195466; font-weight: bold;">RUN</span> <span style="color: #2aa889;">"$PLUGIN_BIN"</span> install logstash-filter-grok
+<span style="color: #195466; font-weight: bold;">RUN</span> <span style="color: #2aa889;">"$PLUGIN_BIN"</span> install logstash-filter-useragent
+<span style="color: #195466; font-weight: bold;">RUN</span> <span style="color: #2aa889;">"$PLUGIN_BIN"</span> install logstash-output-elasticsearch
+
+<span style="color: #195466; font-weight: bold;">COPY</span> ./conf /etc/logstash
+
+<span style="color: #195466; font-weight: bold;">CMD</span> [<span style="color: #2aa889;">"-f"</span>, <span style="color: #2aa889;">"/etc/logstash/logstash.conf"</span>]
+</pre>
+</div>
+
+<p>
+After this, our project should have the following files:
+</p>
+
+<pre class="example">
+code/nginx-elk-logging
+├── docker-compose.yaml
+├── logstash
+│   ├── conf
+│   │   ├── es_template.json
+│   │   ├── logstash.conf
+│   │   └── patterns
+│   │       ├── nginx_access
+│   │       └── nginx_error
+│   └── Dockerfile
+└── nginx
+    ├── conf
+    │   └── nginx.conf
+    ├── data
+    │   └── index.html
+    └── Dockerfile
+
+6 directories, 9 files
+</pre>
+</div>
+</div>
+
+<div id="outline-container-org868a495" class="outline-2">
+<h2 id="org868a495">Running the solution</h2>
+<div class="outline-text-2" id="text-org868a495">
+<p>
+Now we have a complete solution that we just can start with <code>docker-compose</code>.
+But before we do that we need to increase <code>max_map_count</code> in the Linux kernel,
+since <code>ElasticSearch</code> <a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/vm-max-map-count.html">needs that</a>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">sudo sysctl -w vm.max_map_count=262144
+</pre>
+</div>
+
+<p>
+Then we can just build and start everything:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">docker-compose build &amp;&amp; docker-compose up
+</pre>
+</div>
+
+<p>
+After all services are ready, we can open up <code>http://localhost:8080</code> in our web
+browser and see that HTML-file we created.
+</p>
+
+<p>
+After making that request, we can look inside <code>ElasticSearch</code> to make sure
+there's log data saved by opening
+<code>http://localhost:9200/logstash-*/_search/?size=10&amp;pretty=1</code> in our
+web browser. We should see something like this:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-javascript">{
+  <span style="color: #2aa889;">"took"</span> : 66,
+  <span style="color: #2aa889;">"timed_out"</span> : <span style="color: #33859e; font-weight: bold;">false</span>,
+  <span style="color: #2aa889;">"_shards"</span> : {
+    <span style="color: #2aa889;">"total"</span> : 5,
+    <span style="color: #2aa889;">"successful"</span> : 5,
+    <span style="color: #2aa889;">"failed"</span> : 0
+  },
+  <span style="color: #2aa889;">"hits"</span> : {
+    <span style="color: #2aa889;">"total"</span> : 3,
+    <span style="color: #2aa889;">"max_score"</span> : 1.0,
+    <span style="color: #2aa889;">"hits"</span> : [
+      {
+        <span style="color: #2aa889;">"_index"</span> : <span style="color: #2aa889;">"logstash-2017.09.30"</span>,
+        <span style="color: #2aa889;">"_type"</span> : <span style="color: #2aa889;">"nginx_error"</span>,
+        <span style="color: #2aa889;">"_id"</span> : <span style="color: #2aa889;">"AV7TNsqn0IwQxIDk66U3"</span>,
+        <span style="color: #2aa889;">"_score"</span> : 1.0,
+        <span style="color: #2aa889;">"_source"</span> : {
+          <span style="color: #2aa889;">"severity"</span> : 3,
+          <span style="color: #2aa889;">"process_id"</span> : <span style="color: #2aa889;">"6"</span>,
+          <span style="color: #2aa889;">"level"</span> : <span style="color: #2aa889;">"error"</span>,
+          <span style="color: #2aa889;">"description"</span> : <span style="color: #2aa889;">"open() \"/nginx/data/favicon.ico\" failed (2: No such file or directory), client: 172.20.0.1, server: , request: \"GET /favicon.ico HTTP/1.1\", host: \"localhost:8080\", referrer: \"http://localhost:8080/\""</span>,
+          <span style="color: #2aa889;">"message"</span> : <span style="color: #2aa889;">"2017/09/30 14:35:36 [error] 6#6: *1 open() \"/nginx/data/favicon.ico\" failed (2: No such file or directory), client: 172.20.0.1, server: , request: \"GET /favicon.ico HTTP/1.1\", host: \"localhost:8080\", referrer: \"http://localhost:8080/\""</span>,
+          <span style="color: #2aa889;">"priority"</span> : 187,
+          <span style="color: #2aa889;">"logsource"</span> : <span style="color: #2aa889;">"8052f1bba67f"</span>,
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"nginx_error"</span>,
+          <span style="color: #2aa889;">"thread_id"</span> : <span style="color: #2aa889;">"6"</span>,
+          <span style="color: #2aa889;">"@timestamp"</span> : <span style="color: #2aa889;">"2017-09-30T14:35:36.000Z"</span>,
+          <span style="color: #2aa889;">"connection_id"</span> : <span style="color: #2aa889;">"1"</span>,
+          <span style="color: #2aa889;">"@version"</span> : <span style="color: #2aa889;">"1"</span>,
+          <span style="color: #2aa889;">"host"</span> : <span style="color: #2aa889;">"172.20.0.4"</span>,
+          <span style="color: #2aa889;">"facility"</span> : 23,
+          <span style="color: #2aa889;">"severity_label"</span> : <span style="color: #2aa889;">"Error"</span>,
+          <span style="color: #2aa889;">"timestamp"</span> : <span style="color: #2aa889;">"Sep 30 14:35:36"</span>,
+          <span style="color: #2aa889;">"facility_label"</span> : <span style="color: #2aa889;">"local7"</span>
+        }
+      },
+      {
+        <span style="color: #2aa889;">"_index"</span> : <span style="color: #2aa889;">"logstash-2017.09.30"</span>,
+        <span style="color: #2aa889;">"_type"</span> : <span style="color: #2aa889;">"logs"</span>,
+        <span style="color: #2aa889;">"_id"</span> : <span style="color: #2aa889;">"AV7TNstG0IwQxIDk66U5"</span>,
+        <span style="color: #2aa889;">"_score"</span> : 1.0,
+        <span style="color: #2aa889;">"_source"</span> : {
+          <span style="color: #2aa889;">"severity"</span> : 6,
+          <span style="color: #2aa889;">"program"</span> : <span style="color: #2aa889;">"nginx_access"</span>,
+          <span style="color: #2aa889;">"message"</span> : <span style="color: #2aa889;">"172.20.0.1 - - [30/Sep/2017:14:35:36 +0000] \"localhost\" \"GET / HTTP/1.1\" 200 237 \"-\" \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.133 Safari/537.36\""</span>,
+          <span style="color: #2aa889;">"priority"</span> : 190,
+          <span style="color: #2aa889;">"logsource"</span> : <span style="color: #2aa889;">"8052f1bba67f"</span>,
+          <span style="color: #2aa889;">"tags"</span> : [
+            <span style="color: #2aa889;">"_grokparsefailure"</span>
+          ],
+          <span style="color: #2aa889;">"@timestamp"</span> : <span style="color: #2aa889;">"2017-09-30T14:35:36.000Z"</span>,
+          <span style="color: #2aa889;">"@version"</span> : <span style="color: #2aa889;">"1"</span>,
+          <span style="color: #2aa889;">"host"</span> : <span style="color: #2aa889;">"172.20.0.4"</span>,
+          <span style="color: #2aa889;">"facility"</span> : 23,
+          <span style="color: #2aa889;">"severity_label"</span> : <span style="color: #2aa889;">"Informational"</span>,
+          <span style="color: #2aa889;">"timestamp"</span> : <span style="color: #2aa889;">"Sep 30 14:35:36"</span>,
+          <span style="color: #2aa889;">"facility_label"</span> : <span style="color: #2aa889;">"local7"</span>
+        }
+      },
+      {
+        <span style="color: #2aa889;">"_index"</span> : <span style="color: #2aa889;">"logstash-2017.09.30"</span>,
+        <span style="color: #2aa889;">"_type"</span> : <span style="color: #2aa889;">"nginx_access"</span>,
+        <span style="color: #2aa889;">"_id"</span> : <span style="color: #2aa889;">"AV7TNsqn0IwQxIDk66U4"</span>,
+        <span style="color: #2aa889;">"_score"</span> : 1.0,
+        <span style="color: #2aa889;">"_source"</span> : {
+          <span style="color: #2aa889;">"server_name"</span> : <span style="color: #2aa889;">"localhost"</span>,
+          <span style="color: #2aa889;">"referer"</span> : <span style="color: #2aa889;">"http://localhost:8080/"</span>,
+          <span style="color: #2aa889;">"body_bytes_sent"</span> : <span style="color: #2aa889;">"571"</span>,
+          <span style="color: #2aa889;">"useragent"</span> : {
+            <span style="color: #2aa889;">"patch"</span> : <span style="color: #2aa889;">"2987"</span>,
+            <span style="color: #2aa889;">"os"</span> : <span style="color: #2aa889;">"Linux"</span>,
+            <span style="color: #2aa889;">"major"</span> : <span style="color: #2aa889;">"57"</span>,
+            <span style="color: #2aa889;">"minor"</span> : <span style="color: #2aa889;">"0"</span>,
+            <span style="color: #2aa889;">"build"</span> : <span style="color: #2aa889;">""</span>,
+            <span style="color: #2aa889;">"name"</span> : <span style="color: #2aa889;">"Chrome"</span>,
+            <span style="color: #2aa889;">"os_name"</span> : <span style="color: #2aa889;">"Linux"</span>,
+            <span style="color: #2aa889;">"device"</span> : <span style="color: #2aa889;">"Other"</span>
+          },
+          <span style="color: #2aa889;">"type"</span> : <span style="color: #2aa889;">"nginx_access"</span>,
+          <span style="color: #2aa889;">"remote_user"</span> : <span style="color: #2aa889;">"-"</span>,
+          <span style="color: #2aa889;">"path"</span> : <span style="color: #2aa889;">"/favicon.ico"</span>,
+          <span style="color: #2aa889;">"@version"</span> : <span style="color: #2aa889;">"1"</span>,
+          <span style="color: #2aa889;">"host"</span> : <span style="color: #2aa889;">"172.20.0.4"</span>,
+          <span style="color: #2aa889;">"visitor_ip"</span> : <span style="color: #2aa889;">"172.20.0.1"</span>,
+          <span style="color: #2aa889;">"timestamp"</span> : <span style="color: #2aa889;">"Sep 30 14:35:36"</span>,
+          <span style="color: #2aa889;">"severity"</span> : 6,
+          <span style="color: #2aa889;">"method"</span> : <span style="color: #2aa889;">"GET"</span>,
+          <span style="color: #2aa889;">"http_version"</span> : <span style="color: #2aa889;">"1.1"</span>,
+          <span style="color: #2aa889;">"message"</span> : <span style="color: #2aa889;">"172.20.0.1 - - [30/Sep/2017:14:35:36 +0000] \"localhost\" \"GET /favicon.ico HTTP/1.1\" 404 571 \"http://localhost:8080/\" \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.133 Safari/537.36\""</span>,
+          <span style="color: #2aa889;">"priority"</span> : 190,
+          <span style="color: #2aa889;">"logsource"</span> : <span style="color: #2aa889;">"8052f1bba67f"</span>,
+          <span style="color: #2aa889;">"@timestamp"</span> : <span style="color: #2aa889;">"2017-09-30T14:35:36.000Z"</span>,
+          <span style="color: #2aa889;">"port"</span> : <span style="color: #2aa889;">"8080"</span>,
+          <span style="color: #2aa889;">"facility"</span> : 23,
+          <span style="color: #2aa889;">"severity_label"</span> : <span style="color: #2aa889;">"Informational"</span>,
+          <span style="color: #2aa889;">"facility_label"</span> : <span style="color: #2aa889;">"local7"</span>,
+          <span style="color: #2aa889;">"status"</span> : <span style="color: #2aa889;">"404"</span>
+        }
+      }
+    ]
+  }
+}
+</pre>
+</div>
+
+<p>
+We have 2 <i>access</i> logs and 1 <i>error</i> log saved in <code>ElasticSearch</code>, with all the
+different values saved as separate values that can be queried.
+</p>
+</div>
+</div>
+</div>
+</body>
+</html>

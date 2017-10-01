@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  nginx:
+    build: ./nginx
+    depends_on:
+      - logstash
+    ports:
+      - 8080:8080
+  logstash:
+    build: ./logstash
+    depends_on:
+      - elasticsearch
+  elasticsearch:
+    image: elasticsearch:5.5-alpine
+    environment:
+      - cluster.name=docker-cluster
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - 9200:9200
