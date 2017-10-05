@@ -1,0 +1,4 @@
+# robots.txt for https://rzetterberg.github.io
+
+User-agent: *
+Disallow: /assets/cv.pdf
