@@ -2,3 +2,4 @@
 
 User-agent: *
 Disallow: /assets/cv.pdf
+Disallow: /assets/968dc8c3993164de8682acaba4aafa8f.pdf
